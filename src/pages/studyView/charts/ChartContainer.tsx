@@ -88,6 +88,7 @@ import {
 import { StructVarGenePair } from 'pages/studyView/StructVarUtils';
 import { Modal } from 'react-bootstrap';
 import { GenericAssayDataType } from 'shared/lib/GenericAssayUtils/GenericAssayCommonUtils';
+import { highlightTargetProps } from 'shared/components/chatSidebar/highlightStore';
 
 export interface AbstractChart {
     toSVGDOMNode: () => Element;
@@ -1711,6 +1712,10 @@ export class ChartContainer extends React.Component<IChartContainerProps, {}> {
                         [styles.highlight]: this.highlightChart,
                     })}
                     data-test={`chart-container-${this.props.chartMeta.uniqueKey}`}
+                    {...highlightTargetProps(
+                        'visualization',
+                        this.props.chartMeta.uniqueKey
+                    )}
                     onMouseEnter={this.handlers.onMouseEnterChart}
                     onMouseLeave={this.handlers.onMouseLeaveChart}
                 >

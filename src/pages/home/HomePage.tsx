@@ -56,6 +56,7 @@ export default class HomePage extends React.Component<
             <PageLayout
                 className="homePageLayout"
                 noMargin={true}
+                pageStore={this.queryStore}
                 rightBar={<RightBar queryStore={this.queryStore} />}
             >
                 <div

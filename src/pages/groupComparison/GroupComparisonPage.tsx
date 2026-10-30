@@ -126,6 +126,7 @@ export default class GroupComparisonPage extends React.Component<
             return (
                 <MSKTabs
                     unmountOnHide={false}
+                    highlightTargetType="comparison-tab"
                     activeTabId={this.urlWrapper.tabId}
                     onTabClick={this.urlWrapper.setTabId}
                     className="primaryTabs mainTabs"

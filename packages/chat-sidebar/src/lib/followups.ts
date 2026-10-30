@@ -1,5 +1,5 @@
 import { FollowupsExchange } from './followupsInput';
-import { PageEvent } from './page-events';
+import { detailsForModel, PageEvent } from './page-events';
 import { embedded } from './parent-origin';
 import { PREFIX } from './threadStorage';
 
@@ -78,7 +78,7 @@ let inFlight: { key: string; controller: AbortController } | undefined;
 export function setFollowupsPage(event: PageEvent): void {
     pagePending = event.pending;
     if (!event.pending) {
-        page = { href: event.href, details: event.details };
+        page = { href: event.href, details: detailsForModel(event.details) };
     }
     update();
 }

@@ -7,9 +7,11 @@ import {
     AVAILABLE_MODELS,
     runChat,
     runFollowups,
+    runHighlights,
     runReport,
     runTitle,
 } from './core.js';
+import { parseCandidates } from './highlights.js';
 
 const PORT = Number(process.env.PORT || 4000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -139,6 +141,35 @@ app.post('/api/chat/followups', async (req, res) => {
         }
         const message =
             err instanceof Error ? err.message : 'follow-ups failed';
+        res.status(500).json({ error: message });
+    }
+});
+
+app.post('/api/chat/highlights', async (req, res) => {
+    const { question, href, pageType, candidates, model } = req.body ?? {};
+    if (typeof question !== 'string' || !question.trim()) {
+        res.status(400).json({ error: 'question (string) required' });
+        return;
+    }
+    const controller = new AbortController();
+    res.on('close', () => controller.abort());
+    try {
+        const result = await runHighlights(
+            {
+                question: question.trim(),
+                href: typeof href === 'string' ? href : '',
+                pageType: typeof pageType === 'string' ? pageType : 'unknown',
+                candidates: parseCandidates(candidates),
+            },
+            model,
+            controller.signal
+        );
+        res.json(result);
+    } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error('highlights generation failed:', err);
+        const message =
+            err instanceof Error ? err.message : 'highlights failed';
         res.status(500).json({ error: message });
     }
 });

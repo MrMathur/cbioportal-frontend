@@ -1,4 +1,5 @@
 import { setFollowupsPage, setFollowupsSidebarOpen } from './followups';
+import { setHighlightsPage } from './highlights';
 import { isFromParent, parentOrigin } from './parent-origin';
 import {
     isSidebarMode,
@@ -30,7 +31,22 @@ export function getLatestPageEvents(): Readonly<LatestPageEvents> {
 }
 
 // Mirrors the host's pageDetails.ts pageType values.
-export type PageType = 'study' | 'results' | 'groupComparison' | 'patient';
+export type PageType =
+    | 'study'
+    | 'results'
+    | 'groupComparison'
+    | 'patient'
+    | 'studySelection';
+
+// The details minus the highlight candidates, which only the research-question
+// highlights use — on the study list they run to hundreds of studies, too many
+// to hand the chat model or the follow-ups prompt.
+export function detailsForModel(
+    details: Record<string, unknown>
+): Record<string, unknown> {
+    const { highlightCandidates: _omitted, ...rest } = details;
+    return rest;
+}
 
 // Undefined on pages without page details (home, query, static pages).
 let pageType: PageType | undefined;
@@ -91,6 +107,7 @@ export function listenForPageEvents(): void {
         }
         updatePageType(event);
         setFollowupsPage(event);
+        setHighlightsPage(event);
     });
     // Posted only once listening, so the host's opening snapshot isn't missed.
     window.parent.postMessage({ type: 'chat-sidebar:ready' }, parentOrigin());

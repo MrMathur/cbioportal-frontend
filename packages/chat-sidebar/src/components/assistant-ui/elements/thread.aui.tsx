@@ -244,6 +244,7 @@ const WELCOME_TITLES: Record<PageType, string> = {
     results: "Let's dig into these results",
     patient: 'Questions about this patient?',
     groupComparison: 'Explore how these groups differ',
+    studySelection: 'Which studies are you looking for?',
 };
 
 const DEFAULT_WELCOME_TITLE = 'Ask anything about cBioPortal';

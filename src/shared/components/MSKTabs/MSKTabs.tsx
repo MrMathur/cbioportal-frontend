@@ -16,6 +16,16 @@ import { observer } from 'mobx-react';
 import MemoizedHandlerFactory from '../../lib/MemoizedHandlerFactory';
 import URL from 'url';
 import { DefaultTooltip, getBrowserWindow } from 'cbioportal-frontend-commons';
+import { ChatHighlightBadge } from '../chatSidebar/ChatHighlightBadge';
+import {
+    HighlightTargetType,
+    highlightTargetProps,
+} from '../chatSidebar/highlightStore';
+import {
+    RegisteredTab,
+    registerTabs,
+    unregisterTabs,
+} from '../chatSidebar/tabRegistry';
 
 export interface IMSKTabProps {
     inactive?: boolean;
@@ -120,6 +130,8 @@ interface IMSKTabsProps {
     hrefRoot?: string;
     onMount?: () => void;
     defaultTabId?: string | Boolean;
+    // Offers the tabs to the chat sidebar's research-question highlights.
+    highlightTargetType?: HighlightTargetType;
     children?: React.ReactNode;
 }
 
@@ -134,6 +146,7 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
     private tabIdToNavTabWidth: { [tabId: string]: number } = {};
     private needToRecomputeNavTabWidths = true;
     private widthReaction: IReactionDisposer;
+    private renderedTabs: RegisteredTab[] = [];
 
     public static defaultProps: Partial<IMSKTabsProps> = {
         unmountOnHide: true,
@@ -369,6 +382,7 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
     ): JSX.Element[][] {
         const pages: JSX.Element[][] = [[]];
         let currentPage = 1;
+        this.renderedTabs = [];
 
         React.Children.forEach(
             children,
@@ -421,6 +435,16 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
                 }
 
                 const href = this.getTabHref(tab.props.id);
+                const highlightTargetType = this.props.highlightTargetType;
+                if (highlightTargetType) {
+                    this.renderedTabs.push({
+                        id: tab.props.id,
+                        label:
+                            typeof tab.props.linkText === 'string'
+                                ? tab.props.linkText
+                                : _.startCase(tab.props.id),
+                    });
+                }
 
                 pages[currentPage - 1].push(
                     <li
@@ -428,6 +452,12 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
                         style={{ cursor: 'pointer' }}
                         ref={this.tabRefHandler.bind(this, tab.props.id)}
                         className={activeClass}
+                        {...(highlightTargetType
+                            ? highlightTargetProps(
+                                  highlightTargetType,
+                                  tab.props.id
+                              )
+                            : {})}
                     >
                         {' '}
                         {tab.props.linkOverride || (
@@ -450,6 +480,13 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
                                     style={tab.props.anchorStyle}
                                 >
                                     {tab.props.linkText}
+                                    {highlightTargetType && (
+                                        <ChatHighlightBadge
+                                            targetType={highlightTargetType}
+                                            targetId={tab.props.id}
+                                            className="chat-highlight-badge-tab"
+                                        />
+                                    )}
                                     {closeButton}
                                 </a>
                             </DefaultTooltip>
@@ -490,13 +527,25 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
                 this.initPaging();
             }
         });
+        this.publishHighlightTabs();
     }
 
     componentWillUnmount() {
         this.widthReaction();
+        if (this.props.highlightTargetType) {
+            unregisterTabs(this.props.highlightTargetType);
+        }
+    }
+
+    // Tabs are collected during render, so they're published once it commits.
+    private publishHighlightTabs() {
+        if (this.props.highlightTargetType) {
+            registerTabs(this.props.highlightTargetType, this.renderedTabs);
+        }
     }
 
     componentDidUpdate() {
+        this.publishHighlightTabs();
         // recompute pagination and paginate to current tab
         if (this.needToRecomputeNavTabWidths) {
             this.computeNavTabWidths();

@@ -6,6 +6,7 @@ import { getChatServerBase, getChatOrigin } from './chatServerBase';
 import { goToPage, normalizeBasePath } from './navigateTool';
 import { PortalWebMcp } from './portalWebMcp';
 import { PageEvent, PageEventPublisher } from './pageEvents';
+import { clearHighlights, setHighlights } from './highlightStore';
 import {
     captureViewport,
     waitForNetworkIdle,
@@ -138,6 +139,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         window.removeEventListener('resize', this.onWindowResize);
         document.body.classList.remove('chat-sidebar-closed');
         document.body.classList.remove('chat-sidebar-resizing');
+        clearHighlights();
         this.webMcp.stop();
         this.pageEvents.stop();
     }
@@ -254,6 +256,12 @@ export default class ChatSidebar extends React.Component<{}, {}> {
             if (e.data.mode === 'expanded' || e.data.mode === 'rail') {
                 this.setMode(e.data.mode);
             }
+            return;
+        }
+        // The research question's highlights for the page on screen; the
+        // iframe re-sends them on every page change, empty while loading.
+        if (e.data?.type === 'chat-sidebar:highlights') {
+            setHighlights(e.data.annotations, e.data.focus);
             return;
         }
         if (e.data?.type === 'chat-sidebar:requestScreenshot') {

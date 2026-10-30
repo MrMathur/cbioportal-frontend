@@ -15,6 +15,7 @@ import {
 import { Thread } from '@/components/assistant-ui/elements/thread.aui';
 import { ToolFallback } from '@/components/assistant-ui/elements/tool-fallback.aui';
 import { ChatHeader } from '@/components/ChatHeader';
+import { ResearchQuestionBar } from '@/components/ResearchQuestionBar';
 import { SidebarRail } from '@/components/SidebarRail';
 import { useCrossTabSync } from '@/hooks/use-cross-tab-sync';
 import {
@@ -68,9 +69,13 @@ const AUTH_ERROR_CONTENT: Record<
     },
 };
 
-// go_to_page/get_page_details are internal plumbing, not something worth
+// These tools are internal plumbing, not something worth
 // surfacing as a visible "used tool" card — everything else still does.
-const SILENT_TOOLS = new Set(['go_to_page', 'get_page_details']);
+const SILENT_TOOLS = new Set([
+    'go_to_page',
+    'get_page_details',
+    'set_research_question',
+]);
 
 // Stands in for the whole sidebar, header and chat list included: there is
 // nothing to do until the user has access or a fresh session. Mirrors
@@ -209,6 +214,7 @@ export function App() {
                     ) : (
                         <>
                             <ChatHeader models={models} />
+                            <ResearchQuestionBar />
                             <div className="min-h-0 flex-1">
                                 <Thread components={THREAD_COMPONENTS} />
                             </div>

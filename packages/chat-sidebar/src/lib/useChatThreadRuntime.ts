@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
     DefaultChatTransport,
@@ -12,7 +12,8 @@ import {
 import { useAISDKRuntime } from '@assistant-ui/ai-sdk';
 import { AuthErrorStatus, getSelectedModel, setAuthError } from './chatSession';
 import { notifyNavigate, resolvePortalLink } from './portal-link';
-import { getLatestPageEvents } from './page-events';
+import { detailsForModel, getLatestPageEvents } from './page-events';
+import { setResearchQuestionFromChat } from './researchQuestion';
 
 export class ChatAuthError extends Error {
     constructor(readonly status: AuthErrorStatus) {
@@ -28,6 +29,10 @@ const attachmentAdapter = new SimpleImageAttachmentAdapter();
 // away. Nothing app-wide belongs in here — a fetch would fire once per thread.
 export function useChatThreadRuntime(): AssistantRuntime {
     const threadId = useAuiState(s => s.threadListItem.id);
+    // Read at tool-call time: a chat gets its remote id with its first message.
+    const remoteId = useAuiState(s => s.threadListItem.remoteId);
+    const threadIdsRef = useRef({ remoteId, threadId });
+    threadIdsRef.current = { remoteId, threadId };
 
     const transport = useMemo(
         () =>
@@ -78,8 +83,29 @@ export function useChatThreadRuntime(): AssistantRuntime {
                     tool: 'get_page_details',
                     toolCallId: toolCall.toolCallId,
                     output: snapshot
-                        ? { ...snapshot.details, pending: snapshot.pending }
+                        ? {
+                              ...detailsForModel(snapshot.details),
+                              pending: snapshot.pending,
+                          }
                         : { available: false },
+                });
+                return;
+            }
+            if (toolCall.toolName === 'set_research_question') {
+                const { question } = toolCall.input as { question: string };
+                const ok = Boolean(question?.trim());
+                if (ok) {
+                    const ids = threadIdsRef.current;
+                    setResearchQuestionFromChat(
+                        ids.remoteId,
+                        ids.threadId,
+                        question
+                    );
+                }
+                addToolOutput({
+                    tool: 'set_research_question',
+                    toolCallId: toolCall.toolCallId,
+                    output: { ok },
                 });
                 return;
             }

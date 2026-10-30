@@ -11,7 +11,20 @@ import {
     getNumPatients,
 } from 'pages/groupComparison/GroupComparisonUtils';
 import { PatientViewPageStore } from 'pages/patientView/clinicalInformation/PatientViewPageStore';
+import { QueryStore } from 'shared/components/query/QueryStore';
 import { getCurrentPageStore } from './currentPageStore';
+import { HighlightTargetType } from './highlightStore';
+import { getRegisteredTabs } from './tabRegistry';
+
+// What the research-question highlights may point at on this page: the ids
+// the chat iframe offers the model, and the only ones the host renders badges
+// for.
+export interface HighlightCandidate {
+    targetType: HighlightTargetType;
+    targetId: string;
+    label: string;
+    description?: string;
+}
 
 interface StudyViewVisibleChart {
     uniqueKey: string;
@@ -29,6 +42,7 @@ interface StudyViewDetails {
     // Filters aren't repeated here — already in the auto-sent href
     // (getCurrentContextHref below) as #filterJson=...
     visibleCharts: StudyViewVisibleChart[];
+    highlightCandidates: HighlightCandidate[];
 }
 
 interface ResultsViewDetails {
@@ -46,6 +60,7 @@ interface ResultsViewDetails {
     // Raw heatmap_track_groups/generic_assay_groups URL params, unparsed.
     heatmapTrackGroups: string | undefined;
     genericAssayTrackGroups: string | undefined;
+    highlightCandidates: HighlightCandidate[];
 }
 
 interface GroupComparisonGroupSummary {
@@ -59,6 +74,15 @@ interface GroupComparisonDetails {
     available: true;
     pageType: 'groupComparison';
     groups: GroupComparisonGroupSummary[];
+    highlightCandidates: HighlightCandidate[];
+}
+
+interface StudySelectionDetails {
+    available: true;
+    pageType: 'studySelection';
+    selectedStudyIds: string[];
+    // Every study in the list; the chat server narrows these to the question.
+    highlightCandidates: HighlightCandidate[];
 }
 
 interface PatientViewDetails {
@@ -84,7 +108,50 @@ export type PageDetails =
     | ResultsViewDetails
     | GroupComparisonDetails
     | PatientViewDetails
+    | StudySelectionDetails
     | UnavailableDetails;
+
+function getTabCandidates(
+    targetType: 'results-tab' | 'comparison-tab'
+): HighlightCandidate[] {
+    return getRegisteredTabs(targetType).map(t => ({
+        targetType,
+        targetId: t.id,
+        label: t.label,
+    }));
+}
+
+const MAX_STUDY_DESCRIPTION_CHARS = 160;
+
+function summarizeStudyDescription(html: string | undefined): string {
+    const text = (html || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return text.length > MAX_STUDY_DESCRIPTION_CHARS
+        ? `${text.slice(0, MAX_STUDY_DESCRIPTION_CHARS)}…`
+        : text;
+}
+
+function getStudySelectionDetails(store: QueryStore): StudySelectionDetails {
+    return {
+        available: true,
+        pageType: 'studySelection',
+        selectedStudyIds: store.selectableSelectedStudyIds,
+        highlightCandidates: store.selectableStudies.map(study => ({
+            targetType: 'study',
+            targetId: study.studyId,
+            label: study.name,
+            description: [
+                `cancer type: ${study.cancerTypeId}`,
+                `${study.allSampleCount} samples`,
+                summarizeStudyDescription(study.description),
+            ]
+                .filter(Boolean)
+                .join('; '),
+        })),
+    };
+}
 
 function getStudyViewDetails(store: StudyViewPageStore): StudyViewDetails {
     return {
@@ -98,6 +165,12 @@ function getStudyViewDetails(store: StudyViewPageStore): StudyViewDetails {
             uniqueKey: c.uniqueKey,
             displayName: c.displayName,
             dataType: c.dataType,
+        })),
+        highlightCandidates: store.visibleAttributes.map(c => ({
+            targetType: 'visualization',
+            targetId: c.uniqueKey,
+            label: c.displayName,
+            description: `${c.dataType} chart`,
         })),
     };
 }
@@ -119,6 +192,7 @@ function getResultsViewDetails(
         ).map(c => String(c.stableId)),
         heatmapTrackGroups: store.urlWrapper.query.heatmap_track_groups,
         genericAssayTrackGroups: store.urlWrapper.query.generic_assay_groups,
+        highlightCandidates: getTabCandidates('results-tab'),
     };
 }
 
@@ -134,6 +208,7 @@ function getGroupComparisonDetails(
             sampleCount: getNumSamples(g),
             patientCount: getNumPatients(g),
         })),
+        highlightCandidates: getTabCandidates('comparison-tab'),
     };
 }
 
@@ -183,6 +258,9 @@ export function getCurrentPageDetails(): PageDetails {
     if (store instanceof PatientViewPageStore) {
         return getPatientViewDetails(store);
     }
+    if (store instanceof QueryStore) {
+        return getStudySelectionDetails(store);
+    }
     return { available: false };
 }
 
@@ -214,6 +292,9 @@ export function isCurrentPageDetailsPending(): boolean {
             store.clinicalEvents.isPending ||
             store.sampleToMutationGenePanelId.isPending
         );
+    }
+    if (store instanceof QueryStore) {
+        return store.cancerStudies.isPending || store.cancerTypes.isPending;
     }
     return false;
 }

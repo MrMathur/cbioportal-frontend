@@ -24,6 +24,7 @@ import ComparisonVsIcon from 'shared/components/ComparisonVsIcon';
 import { getComparisonParamsForTable } from 'pages/studyView/StudyViewComparisonUtils';
 import { DownloadControlOption } from 'cbioportal-frontend-commons';
 import { getServerConfig } from 'config/config';
+import { ChatHighlightBadge } from 'shared/components/chatSidebar/ChatHighlightBadge';
 
 export interface IChartHeaderProps {
     chartMeta: ChartMeta;
@@ -701,6 +702,10 @@ export class ChartHeader extends React.Component<IChartHeaderProps, {}> {
                 }}
             >
                 <div className={classnames(styles.name, styles.draggable)}>
+                    <ChatHighlightBadge
+                        targetType="visualization"
+                        targetId={this.props.chartMeta.uniqueKey}
+                    />
                     {!this.props.hideLabel && (
                         <span className="chartTitle">{this.props.title}</span>
                     )}

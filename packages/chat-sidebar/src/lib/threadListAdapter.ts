@@ -4,6 +4,7 @@ import {
     ThreadHistoryProvider,
     useThreadHistoryAdapters,
 } from './threadHistoryAdapter';
+import { removeResearch } from './researchQuestion';
 import { PREFIX, storage } from './threadStorage';
 import { titleAdapter } from './titleAdapter';
 
@@ -24,6 +25,10 @@ const base = createLocalStorageAdapter({
 // down and reloads it.
 export const threadListAdapter: RemoteThreadListAdapter = {
     ...base,
+    async delete(remoteId) {
+        await base.delete(remoteId);
+        removeResearch(remoteId);
+    },
     unstable_Provider: ThreadHistoryProvider,
     unstable_useAdapters: useThreadHistoryAdapters,
 };

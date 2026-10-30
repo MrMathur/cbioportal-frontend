@@ -849,6 +849,7 @@ export default class ResultsViewPage extends React.Component<
                                             this.resultsViewPageStore.tabId
                                         }
                                         unmountOnHide={false}
+                                        highlightTargetType="results-tab"
                                         onTabClick={(id: string) =>
                                             this.resultsViewPageStore.handleTabChange(
                                                 id

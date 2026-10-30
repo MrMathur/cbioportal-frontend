@@ -1,0 +1,128 @@
+// Research-question highlights: numbered badges on the chosen elements, and a
+// focus mode (body.chat-highlight-focus) that recedes every other candidate.
+
+$chat-highlight-accent: #3786c2;
+$chat-highlight-accent-deep: #1f5f94;
+$chat-highlight-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+@keyframes chat-highlight-badge-in {
+    0% {
+        opacity: 0;
+        transform: scale(0.4);
+    }
+    70% {
+        opacity: 1;
+        transform: scale(1.12);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes chat-highlight-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba($chat-highlight-accent, 0.45);
+    }
+    100% {
+        box-shadow: 0 0 0 6px rgba($chat-highlight-accent, 0);
+    }
+}
+
+.chat-highlight-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-right: 6px;
+    border-radius: 9px;
+    background: linear-gradient(
+        135deg,
+        $chat-highlight-accent,
+        $chat-highlight-accent-deep
+    );
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+    font-variant-numeric: tabular-nums;
+    vertical-align: middle;
+    cursor: help;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    animation: chat-highlight-badge-in 0.35s $chat-highlight-ease both,
+        chat-highlight-pulse 1.2s ease-out 0.35s 2;
+
+    &:focus-visible {
+        outline: 2px solid $chat-highlight-accent;
+        outline-offset: 2px;
+    }
+}
+
+.chat-highlight-badge-tab {
+    margin: 0 0 0 6px;
+    position: relative;
+    top: -1px;
+}
+
+.chat-highlight-tooltip {
+    max-width: 280px;
+    line-height: 1.4;
+}
+
+.chat-highlight-tooltip-title {
+    margin-bottom: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    opacity: 0.75;
+}
+
+[data-chat-highlight-target] {
+    transition: opacity 0.35s $chat-highlight-ease,
+        filter 0.35s $chat-highlight-ease, outline-color 0.35s ease,
+        box-shadow 0.35s ease;
+}
+
+body.chat-highlight-focus {
+    [data-chat-highlight-target]:not([data-chat-highlighted]) {
+        opacity: 0.28;
+        filter: grayscale(0.85);
+
+        // A faded chart is still usable: hovering brings it back.
+        &:hover {
+            opacity: 0.85;
+            filter: none;
+        }
+    }
+
+    // Charts: a ring that reads as "chosen" without touching the chart's own
+    // border, which Study View restyles on hover.
+    [data-chat-highlight-target^='visualization:'][data-chat-highlighted] {
+        outline: 2px solid rgba($chat-highlight-accent, 0.85);
+        outline-offset: 2px;
+        box-shadow: 0 6px 20px rgba($chat-highlight-accent, 0.22);
+    }
+
+    // Study rows and tabs are too small for a ring; tint them instead.
+    li[data-chat-highlight-target^='study:'][data-chat-highlighted] {
+        background: rgba($chat-highlight-accent, 0.08);
+        box-shadow: inset 3px 0 0 $chat-highlight-accent;
+    }
+
+    li[data-chat-highlight-target*='-tab:'][data-chat-highlighted] > a {
+        box-shadow: inset 0 -2px 0 $chat-highlight-accent;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-highlight-badge {
+        animation: none;
+    }
+
+    [data-chat-highlight-target] {
+        transition: none;
+    }
+}

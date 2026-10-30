@@ -21,6 +21,8 @@ import StudyTagsTooltip, {
 } from '../../studyTagsTooltip/StudyTagsTooltip';
 import { formatStudyReferenceGenome } from 'shared/lib/referenceGenomeUtils';
 import { getServerConfig } from 'config/config';
+import { ChatHighlightBadge } from 'shared/components/chatSidebar/ChatHighlightBadge';
+import { highlightTargetProps } from 'shared/components/chatSidebar/highlightStore';
 
 const styles = {
     ...styles_any,
@@ -207,6 +209,7 @@ export default class StudyList extends QueryStoreComponent<
             <li
                 key={arrayIndex}
                 className={liClassName}
+                {...highlightTargetProps('study', study.studyId)}
                 data-test={
                     this.store.isVirtualStudy(study.studyId)
                         ? 'VirtualStudySelect'
@@ -244,6 +247,10 @@ export default class StudyList extends QueryStoreComponent<
                     {() => {
                         return (
                             <div className={styles.StudyMeta}>
+                                <ChatHighlightBadge
+                                    targetType="study"
+                                    targetId={study.studyId}
+                                />
                                 {!this.store.isDeletedVirtualStudy(
                                     study.studyId
                                 ) && this.renderSamples(study)}

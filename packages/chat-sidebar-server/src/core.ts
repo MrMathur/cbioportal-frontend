@@ -23,6 +23,15 @@ import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createMCPClient, MCPClient } from '@ai-sdk/mcp';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { LangfuseClient } from '@langfuse/client';
+import {
+    formatCandidates,
+    HighlightAnnotation,
+    HighlightCandidate,
+    MAX_ANNOTATIONS,
+    narrowCandidates,
+    TARGET_TYPES,
+    validateAnnotations,
+} from './highlights.js';
 
 const vertexAnthropic = createVertexAnthropic({
     project: process.env.GOOGLE_VERTEX_PROJECT,
@@ -87,6 +96,10 @@ const LOCAL_REPORT_PROMPT_TEXT = readFileSync(
 );
 const LOCAL_FOLLOWUPS_PROMPT_TEXT = readFileSync(
     join(__dirname, 'followupsPrompt.md'),
+    'utf-8'
+);
+const LOCAL_HIGHLIGHTS_PROMPT_TEXT = readFileSync(
+    join(__dirname, 'highlightsPrompt.md'),
     'utf-8'
 );
 // What the assistant can and can't do, so the follow-ups suggest only what it
@@ -263,6 +276,19 @@ const getPageDetailsTool = tool({
     inputSchema: z.object({}),
 });
 
+// Also client-side — the research question lives in the sidebar, per chat.
+const setResearchQuestionTool = tool({
+    description:
+        "Sets the research question shown at the top of the sidebar for this chat. The sidebar uses it to mark the most relevant studies, charts and tabs on the user's page with numbered badges. Call it when the user asks to set or change their research question, or states a clear, lasting research goal they want the page to be guided by. Don't call it for one-off questions.",
+    inputSchema: z.object({
+        question: z
+            .string()
+            .describe(
+                'The research question, as one concise sentence in the user\'s words, e.g. "Does TP53 mutation status affect survival in breast cancer?"'
+            ),
+    }),
+});
+
 // Ids are "<provider>:<model>".
 function getModel(id: string): LanguageModel {
     const separatorIndex = id.indexOf(':');
@@ -324,6 +350,7 @@ export async function runChat(
         ...mcpTools,
         go_to_page: goToPageTool,
         get_page_details: getPageDetailsTool,
+        set_research_question: setResearchQuestionTool,
     };
 
     const result = streamText({
@@ -461,4 +488,64 @@ export async function* runFollowups(
         if (++count === FOLLOWUP_COUNT) return;
     }
     if (error !== undefined) throw error;
+}
+
+const HighlightsSchema = z.object({
+    insight: z.string(),
+    annotations: z
+        .array(
+            z.object({
+                targetType: z.enum(TARGET_TYPES),
+                targetId: z.string(),
+                reason: z.string(),
+            })
+        )
+        .max(MAX_ANNOTATIONS),
+});
+
+export interface HighlightsInput {
+    question: string;
+    href: string;
+    pageType: string;
+    candidates: HighlightCandidate[];
+}
+
+export interface HighlightsResult {
+    insight: string;
+    annotations: HighlightAnnotation[];
+}
+
+// The elements of the user's page most relevant to their research question,
+// chosen only from the candidates the page offered. No tools, no reasoning.
+export async function runHighlights(
+    { question, href, pageType, candidates }: HighlightsInput,
+    model: string | undefined,
+    abortSignal: AbortSignal
+): Promise<HighlightsResult> {
+    const modelId = model || AVAILABLE_MODELS[0]?.id;
+    if (!modelId) {
+        throw new Error('No model available — see AVAILABLE_MODELS.');
+    }
+    if (candidates.length === 0) {
+        return { insight: '', annotations: [] };
+    }
+    const offered = narrowCandidates(question, candidates);
+    const { output } = await generateText({
+        model: getModel(modelId),
+        system: LOCAL_HIGHLIGHTS_PROMPT_TEXT,
+        messages: [
+            {
+                role: 'user',
+                content: `## Research question\n\n${question}\n\n## Page\n\nType: ${pageType}\nURL: ${href}\n\n## Candidates (${
+                    offered.length
+                } of ${candidates.length})\n\n${formatCandidates(offered)}`,
+            },
+        ],
+        output: Output.object({ schema: HighlightsSchema }),
+        abortSignal,
+    });
+    return {
+        insight: output.insight.trim(),
+        annotations: validateAnnotations(output.annotations, offered),
+    };
 }
