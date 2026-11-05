@@ -16,6 +16,8 @@ import { Thread } from '@/components/assistant-ui/elements/thread.aui';
 import { ToolFallback } from '@/components/assistant-ui/elements/tool-fallback.aui';
 import { ChatHeader } from '@/components/ChatHeader';
 import { ResearchQuestionBar } from '@/components/ResearchQuestionBar';
+import { EarlierQuestions } from '@/components/EarlierQuestions';
+import { guidanceEnabled } from '@/lib/guidanceFlags';
 import { SidebarRail } from '@/components/SidebarRail';
 import { useCrossTabSync } from '@/hooks/use-cross-tab-sync';
 import {
@@ -215,6 +217,7 @@ export function App() {
                         <>
                             <ChatHeader models={models} />
                             <ResearchQuestionBar />
+                            {guidanceEnabled && <EarlierQuestions />}
                             <div className="min-h-0 flex-1">
                                 <Thread components={THREAD_COMPONENTS} />
                             </div>

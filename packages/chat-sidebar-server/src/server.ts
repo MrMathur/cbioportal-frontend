@@ -12,6 +12,8 @@ import {
     runTitle,
 } from './core.js';
 import { parseCandidates } from './highlights.js';
+import { parseGuidanceContext } from './classification.js';
+import { logGuidanceEvent, parseClientEvent } from './guidanceLog.js';
 
 const PORT = Number(process.env.PORT || 4000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -50,13 +52,20 @@ app.get('/api/chat/models', (_req, res) => {
 });
 
 app.post('/api/chat/message', async (req, res) => {
-    const { messages, model, pageHref } = req.body ?? {};
+    const { messages, model, pageHref, guidance } = req.body ?? {};
     if (!Array.isArray(messages)) {
         res.status(400).json({ error: 'messages (array) required' });
         return;
     }
     try {
-        await runChat(messages, res, model, pageHref);
+        // Sent only when the sidebar has the guided assistant turned on.
+        await runChat(
+            messages,
+            res,
+            model,
+            pageHref,
+            guidance ? parseGuidanceContext(guidance) : undefined
+        );
     } catch (err) {
         console.error('chat message failed:', err);
         if (!res.headersSent) {
@@ -64,6 +73,18 @@ app.post('/api/chat/message', async (req, res) => {
             res.status(500).json({ error: message });
         }
     }
+});
+
+// The guided assistant's client-side events (slot edits, restores, topic
+// changes), written to the same log as the classifications.
+app.post('/api/chat/log', (req, res) => {
+    const entry = parseClientEvent(req.body);
+    if (!entry) {
+        res.status(400).json({ error: 'unknown or malformed event' });
+        return;
+    }
+    void logGuidanceEvent(entry);
+    res.status(204).end();
 });
 
 app.post('/api/chat/report', async (req, res) => {

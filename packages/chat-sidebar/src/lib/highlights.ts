@@ -4,7 +4,11 @@ import {
 } from './chatSession';
 import { PageEvent } from './page-events';
 import { embedded, parentOrigin } from './parent-origin';
-import { getActiveResearch, subscribeToResearch } from './researchQuestion';
+import {
+    ActiveResearch,
+    getActiveResearch,
+    subscribeToResearch,
+} from './researchQuestion';
 
 // Badges on the elements of the user's page most relevant to the chat's
 // research question. Requested from the server whenever the question or the
@@ -148,6 +152,13 @@ function requestKey(question: string, p: HighlightsPage): string {
     ]);
 }
 
+// What the highlights are chosen for: the latest message while it is an
+// interface question ("where is the download button?"), otherwise the
+// research question.
+function highlightQuery(research: ActiveResearch): string {
+    return research.interfaceQuery || research.question;
+}
+
 function publish(next: HighlightsState): void {
     state = next;
     for (const listener of listeners) listener();
@@ -161,7 +172,9 @@ function postToHost(): void {
     if (!embedded) return;
     const research = getActiveResearch();
     const annotations =
-        research.question && !research.dismissed && state.status === 'ready'
+        highlightQuery(research) &&
+        !research.dismissed &&
+        state.status === 'ready'
             ? state.annotations
             : [];
     const message = {
@@ -181,7 +194,9 @@ function abortInFlight(): void {
 }
 
 function update(): void {
-    const { question, dismissed } = getActiveResearch();
+    const research = getActiveResearch();
+    const question = highlightQuery(research);
+    const { dismissed } = research;
     if (!question || dismissed || !page || page.candidates.length === 0) {
         abortInFlight();
         publish({ ...IDLE, candidateCount: page?.candidates.length ?? 0 });
@@ -260,7 +275,7 @@ export function setHighlightsPage(event: PageEvent): void {
 
 /** Asks again for the current question and page, after an error. */
 export function retryHighlights(): void {
-    const { question } = getActiveResearch();
+    const question = highlightQuery(getActiveResearch());
     if (!question || !page) return;
     cache.delete(requestKey(question, page));
     update();

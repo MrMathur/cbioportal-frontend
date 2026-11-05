@@ -1,5 +1,6 @@
 'use client';
 
+import { ClassificationBadge } from '@/components/ClassificationBadge';
 import {
     ComposerAttachments,
     UserMessageAttachments,
@@ -658,7 +659,11 @@ const AssistantMessage: FC = () => {
                                     )
                                 );
                             case 'data':
-                                return part.dataRendererUI;
+                                return part.name === 'classification' ? (
+                                    <ClassificationBadge data={part.data} />
+                                ) : (
+                                    part.dataRendererUI
+                                );
                             case 'file':
                                 return (
                                     <div

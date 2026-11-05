@@ -80,6 +80,32 @@ $chat-highlight-ease: cubic-bezier(0.22, 1, 0.36, 1);
     opacity: 0.75;
 }
 
+// Controls (buttons, search and query boxes): the badge sits on the
+// corner, and a highlighted control gets a ring even outside focus mode,
+// since pointing at it is the point.
+.chat-highlight-control {
+    position: relative;
+    display: inline-block;
+
+    &.chat-highlight-control-block {
+        display: block;
+    }
+
+    &[data-chat-highlighted] {
+        border-radius: 4px;
+        outline: 2px solid rgba($chat-highlight-accent, 0.85);
+        outline-offset: 2px;
+    }
+}
+
+.chat-highlight-badge.chat-highlight-control-badge {
+    position: absolute;
+    top: -9px;
+    right: -9px;
+    margin: 0;
+    z-index: 2;
+}
+
 [data-chat-highlight-target] {
     transition: opacity 0.35s $chat-highlight-ease,
         filter 0.35s $chat-highlight-ease, outline-color 0.35s ease,

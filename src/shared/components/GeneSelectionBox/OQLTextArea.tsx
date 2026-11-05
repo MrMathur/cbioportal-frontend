@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ChatHighlightControl } from 'shared/components/chatSidebar/ChatHighlightControl';
 import _ from 'lodash';
 import { observer } from 'mobx-react';
 import classnames from 'classnames';
@@ -294,66 +295,72 @@ export default class OQLTextArea extends React.Component<
 
     render() {
         return (
-            <div className={styles.genesSelection}>
-                <div className={styles.topRow}>
-                    <textarea
-                        ref={this.textAreaRef as any}
-                        onFocus={this.onFocus}
-                        onBlur={this.onBlur}
-                        className={classnames(this.textAreaClasses)}
-                        rows={5}
-                        cols={80}
-                        placeholder={this.promptText}
-                        title={this.promptText}
-                        defaultValue={this.getTextAreaValue()}
-                        onChange={this.onChange}
-                        data-test="geneSet"
-                        style={{ height: this.props.textAreaHeight }}
-                    />
+            <ChatHighlightControl
+                controlId="gene-query"
+                className="chat-highlight-control-block"
+            >
+                <div className={styles.genesSelection}>
+                    <div className={styles.topRow}>
+                        <textarea
+                            ref={this.textAreaRef as any}
+                            onFocus={this.onFocus}
+                            onBlur={this.onBlur}
+                            className={classnames(this.textAreaClasses)}
+                            rows={5}
+                            cols={80}
+                            placeholder={this.promptText}
+                            title={this.promptText}
+                            defaultValue={this.getTextAreaValue()}
+                            onChange={this.onChange}
+                            data-test="geneSet"
+                            style={{ height: this.props.textAreaHeight }}
+                        />
 
-                    {this.props.submitButton}
-                </div>
-                <div className={'oqlValidationContainer'}>
-                    <GeneSymbolValidator
-                        focus={this.props.focus}
-                        geneQuery={this.queryToBeValidated}
-                        skipGeneValidation={this.skipGenesValidation}
-                        updateGeneQuery={this.updateGeneQuery}
-                        afterValidation={this.afterGeneSymbolValidation}
-                        replaceGene={this.replaceGene}
-                        errorMessageOnly={
-                            this.props.location === GeneBoxType.STUDY_VIEW_PAGE
-                        }
-                        highlightError={this.highlightError}
-                    >
-                        {this.props.children}
-                    </GeneSymbolValidator>
-                </div>
-                <div>
-                    {this.showErrorsAndMessages && this.props.error && (
-                        <span
-                            className={queryStoreStyles.errorMessage}
-                            data-test="oqlErrorMessage"
+                        {this.props.submitButton}
+                    </div>
+                    <div className={'oqlValidationContainer'}>
+                        <GeneSymbolValidator
+                            focus={this.props.focus}
+                            geneQuery={this.queryToBeValidated}
+                            skipGeneValidation={this.skipGenesValidation}
+                            updateGeneQuery={this.updateGeneQuery}
+                            afterValidation={this.afterGeneSymbolValidation}
+                            replaceGene={this.replaceGene}
+                            errorMessageOnly={
+                                this.props.location ===
+                                GeneBoxType.STUDY_VIEW_PAGE
+                            }
+                            highlightError={this.highlightError}
                         >
-                            {this.props.error}
-                        </span>
-                    )}
-
-                    {this.showErrorsAndMessages &&
-                        this.props.messages &&
-                        this.props.messages.map(msg => (
-                            <span className={queryStoreStyles.oqlMessage}>
-                                <i
-                                    className="fa fa-info-circle"
-                                    style={{
-                                        marginRight: 5,
-                                    }}
-                                />
-                                {msg}
+                            {this.props.children}
+                        </GeneSymbolValidator>
+                    </div>
+                    <div>
+                        {this.showErrorsAndMessages && this.props.error && (
+                            <span
+                                className={queryStoreStyles.errorMessage}
+                                data-test="oqlErrorMessage"
+                            >
+                                {this.props.error}
                             </span>
-                        ))}
+                        )}
+
+                        {this.showErrorsAndMessages &&
+                            this.props.messages &&
+                            this.props.messages.map(msg => (
+                                <span className={queryStoreStyles.oqlMessage}>
+                                    <i
+                                        className="fa fa-info-circle"
+                                        style={{
+                                            marginRight: 5,
+                                        }}
+                                    />
+                                    {msg}
+                                </span>
+                            ))}
+                    </div>
                 </div>
-            </div>
+            </ChatHighlightControl>
         );
     }
 }

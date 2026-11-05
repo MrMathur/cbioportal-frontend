@@ -127,3 +127,23 @@ test('narrowCandidates keeps the best word matches in original order', () => {
     );
     assert.equal(narrowCandidates('x', studies).length, 4);
 });
+
+test('narrowCandidates always keeps controls', () => {
+    const studies = Array.from({ length: 10 }, (_, i) => ({
+        targetType: 'study' as const,
+        targetId: `breast_${i}`,
+        label: `Breast study ${i}`,
+    }));
+    const control = {
+        targetType: 'control' as const,
+        targetId: 'study-search',
+        label: 'Study search box',
+    };
+    const narrowed = narrowCandidates(
+        'find a breast study',
+        [...studies, control],
+        5
+    );
+    assert.equal(narrowed.length, 5);
+    assert.ok(narrowed.some(c => c.targetType === 'control'));
+});

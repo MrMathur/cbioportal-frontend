@@ -15,6 +15,7 @@ import { SearchBox } from 'shared/components/query/filteredSearch/SearchBox';
 import { StudySearchControls } from 'shared/components/query/filteredSearch/StudySearchControls';
 import { observer, useLocalObservable } from 'mobx-react-lite';
 import { sleep } from 'shared/lib/TimeUtils';
+import { ChatHighlightControl } from 'shared/components/chatSidebar/ChatHighlightControl';
 
 export type StudySearchProps = {
     parser: QueryParser;
@@ -61,21 +62,26 @@ export const StudySearch: FunctionComponent<StudySearchProps> = observer(
                 data-test="study-search"
                 className={`dropdown ${store.isMenuOpen ? 'open' : ''}`}
             >
-                <div className="input-group input-group-sm input-group-toggle">
-                    <SearchBox
-                        queryString={toQueryString(props.query)}
-                        onType={(update: string) =>
-                            handleQueryTyping(props, update)
-                        }
-                        onFocus={onFocusSearchBox}
-                        onBlur={onBlurSearchBox}
-                        onKeyDown={onKeyDownSearchBox}
-                    />
-                    <SearchMenuToggle
-                        onClick={store.toggle}
-                        open={store.isMenuOpen}
-                    />
-                </div>
+                <ChatHighlightControl
+                    controlId="study-search"
+                    className="chat-highlight-control-block"
+                >
+                    <div className="input-group input-group-sm input-group-toggle">
+                        <SearchBox
+                            queryString={toQueryString(props.query)}
+                            onType={(update: string) =>
+                                handleQueryTyping(props, update)
+                            }
+                            onFocus={onFocusSearchBox}
+                            onBlur={onBlurSearchBox}
+                            onKeyDown={onKeyDownSearchBox}
+                        />
+                        <SearchMenuToggle
+                            onClick={store.toggle}
+                            open={store.isMenuOpen}
+                        />
+                    </div>
+                </ChatHighlightControl>
                 <ClearSearchButton
                     show={props.query.length > 0}
                     onClick={() => handleQueryTyping(props, '')}

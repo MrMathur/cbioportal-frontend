@@ -8,13 +8,15 @@ export type HighlightTargetType =
     | 'study'
     | 'visualization'
     | 'results-tab'
-    | 'comparison-tab';
+    | 'comparison-tab'
+    | 'control';
 
 const TARGET_TYPES: readonly HighlightTargetType[] = [
     'study',
     'visualization',
     'results-tab',
     'comparison-tab',
+    'control',
 ];
 
 export interface HighlightAnnotation {

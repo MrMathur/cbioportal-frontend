@@ -1,3 +1,7 @@
+import { setCatalogPage } from './catalog';
+import { guidanceEnabled } from './guidanceFlags';
+import { setLatestQuestionPage } from './researchQuestion';
+import { setPageSyncPage } from './pageSync';
 import { setFollowupsPage, setFollowupsSidebarOpen } from './followups';
 import { setHighlightsPage } from './highlights';
 import { isFromParent, parentOrigin } from './parent-origin';
@@ -104,8 +108,13 @@ export function listenForPageEvents(): void {
         if (!event.pending) {
             latest.settledSnapshot = event;
             setSettledSnapshot(event);
+            if (guidanceEnabled) {
+                setLatestQuestionPage(event.href);
+                setPageSyncPage(event);
+            }
         }
         updatePageType(event);
+        setCatalogPage(event);
         setFollowupsPage(event);
         setHighlightsPage(event);
     });

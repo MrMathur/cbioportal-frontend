@@ -35,6 +35,8 @@ import {
     subscribeToResearch,
 } from '@/lib/researchQuestion';
 import { cn } from '@/lib/utils';
+import { guidanceEnabled } from '@/lib/guidanceFlags';
+import { ResearchLevels } from '@/components/ResearchLevels';
 
 const PLACEHOLDER =
     'Set a research question to highlight the most relevant studies, charts and tabs on the page.';
@@ -192,13 +194,15 @@ export const ResearchQuestionBar: FC = () => {
                         >
                             <FocusIcon />
                         </TooltipIconButton>
-                        <TooltipIconButton
-                            tooltip="Edit question"
-                            size="icon-xs"
-                            onClick={startEditing}
-                        >
-                            <PencilIcon />
-                        </TooltipIconButton>
+                        {!guidanceEnabled && (
+                            <TooltipIconButton
+                                tooltip="Edit question"
+                                size="icon-xs"
+                                onClick={startEditing}
+                            >
+                                <PencilIcon />
+                            </TooltipIconButton>
+                        )}
                         {research.dismissed ? (
                             <TooltipIconButton
                                 tooltip="Show highlights"
@@ -224,7 +228,9 @@ export const ResearchQuestionBar: FC = () => {
                 )}
             </div>
 
-            {editing ? (
+            {guidanceEnabled ? (
+                <ResearchLevels research={research} />
+            ) : editing ? (
                 <div className="mt-1.5">
                     <Textarea
                         ref={textareaRef}

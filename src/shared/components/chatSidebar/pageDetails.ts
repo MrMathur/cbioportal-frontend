@@ -15,6 +15,11 @@ import { QueryStore } from 'shared/components/query/QueryStore';
 import { getCurrentPageStore } from './currentPageStore';
 import { HighlightTargetType } from './highlightStore';
 import { getRegisteredTabs } from './tabRegistry';
+import {
+    CONTROL_DESCRIPTIONS,
+    CONTROL_LABELS,
+    getRegisteredControls,
+} from './controlRegistry';
 
 // What the research-question highlights may point at on this page: the ids
 // the chat iframe offers the model, and the only ones the host renders badges
@@ -121,6 +126,16 @@ function getTabCandidates(
     }));
 }
 
+// The registered controls on screen, offered on every page with details.
+function getControlCandidates(): HighlightCandidate[] {
+    return getRegisteredControls().map(id => ({
+        targetType: 'control',
+        targetId: id,
+        label: CONTROL_LABELS[id],
+        description: CONTROL_DESCRIPTIONS[id],
+    }));
+}
+
 const MAX_STUDY_DESCRIPTION_CHARS = 160;
 
 function summarizeStudyDescription(html: string | undefined): string {
@@ -138,18 +153,21 @@ function getStudySelectionDetails(store: QueryStore): StudySelectionDetails {
         available: true,
         pageType: 'studySelection',
         selectedStudyIds: store.selectableSelectedStudyIds,
-        highlightCandidates: store.selectableStudies.map(study => ({
-            targetType: 'study',
-            targetId: study.studyId,
-            label: study.name,
-            description: [
-                `cancer type: ${study.cancerTypeId}`,
-                `${study.allSampleCount} samples`,
-                summarizeStudyDescription(study.description),
-            ]
-                .filter(Boolean)
-                .join('; '),
-        })),
+        highlightCandidates: [
+            ...getControlCandidates(),
+            ...store.selectableStudies.map(study => ({
+                targetType: 'study' as const,
+                targetId: study.studyId,
+                label: study.name,
+                description: [
+                    `cancer type: ${study.cancerTypeId}`,
+                    `${study.allSampleCount} samples`,
+                    summarizeStudyDescription(study.description),
+                ]
+                    .filter(Boolean)
+                    .join('; '),
+            })),
+        ],
     };
 }
 
@@ -166,12 +184,15 @@ function getStudyViewDetails(store: StudyViewPageStore): StudyViewDetails {
             displayName: c.displayName,
             dataType: c.dataType,
         })),
-        highlightCandidates: store.visibleAttributes.map(c => ({
-            targetType: 'visualization',
-            targetId: c.uniqueKey,
-            label: c.displayName,
-            description: `${c.dataType} chart`,
-        })),
+        highlightCandidates: [
+            ...getControlCandidates(),
+            ...store.visibleAttributes.map(c => ({
+                targetType: 'visualization' as const,
+                targetId: c.uniqueKey,
+                label: c.displayName,
+                description: `${c.dataType} chart`,
+            })),
+        ],
     };
 }
 
@@ -192,7 +213,10 @@ function getResultsViewDetails(
         ).map(c => String(c.stableId)),
         heatmapTrackGroups: store.urlWrapper.query.heatmap_track_groups,
         genericAssayTrackGroups: store.urlWrapper.query.generic_assay_groups,
-        highlightCandidates: getTabCandidates('results-tab'),
+        highlightCandidates: [
+            ...getControlCandidates(),
+            ...getTabCandidates('results-tab'),
+        ],
     };
 }
 
@@ -208,7 +232,10 @@ function getGroupComparisonDetails(
             sampleCount: getNumSamples(g),
             patientCount: getNumPatients(g),
         })),
-        highlightCandidates: getTabCandidates('comparison-tab'),
+        highlightCandidates: [
+            ...getControlCandidates(),
+            ...getTabCandidates('comparison-tab'),
+        ],
     };
 }
 

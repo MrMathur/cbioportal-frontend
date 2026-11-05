@@ -4,6 +4,8 @@ import {
     streamText,
     generateText,
     convertToModelMessages,
+    createUIMessageStream,
+    pipeUIMessageStreamToResponse,
     Output,
     stepCountIs,
     tool,
@@ -32,6 +34,17 @@ import {
     TARGET_TYPES,
     validateAnnotations,
 } from './highlights.js';
+import {
+    Classification,
+    findLatestClassification,
+    formatClassifierInput,
+    GuidanceContext,
+    RawClassificationSchema,
+    resolveClassification,
+    textOfMessage,
+} from './classification.js';
+import { guidanceBlock, parseSections } from './guidance.js';
+import { logGuidanceEvent } from './guidanceLog.js';
 
 const vertexAnthropic = createVertexAnthropic({
     project: process.env.GOOGLE_VERTEX_PROJECT,
@@ -101,6 +114,15 @@ const LOCAL_FOLLOWUPS_PROMPT_TEXT = readFileSync(
 const LOCAL_HIGHLIGHTS_PROMPT_TEXT = readFileSync(
     join(__dirname, 'highlightsPrompt.md'),
     'utf-8'
+);
+// Codebook version 5: the request classification and the per-level guidance
+// added to the reply's system prompt. Local only, not in Langfuse.
+const CLASSIFY_PROMPT_TEXT = readFileSync(
+    join(__dirname, 'classifyPrompt.md'),
+    'utf-8'
+);
+const GUIDANCE_SECTIONS = parseSections(
+    readFileSync(join(__dirname, 'guidancePrompt.md'), 'utf-8')
 );
 // What the assistant can and can't do, so the follow-ups suggest only what it
 // can deliver.
@@ -332,11 +354,58 @@ export const AVAILABLE_MODELS: readonly ModelInfo[] = [
 
 export const MODEL = AVAILABLE_MODELS[0]?.id ?? '(none configured)';
 
+export interface GuidanceRequest {
+    context: GuidanceContext;
+    sessionId: string;
+    participant: string;
+    threadId: string;
+}
+
+// Classification runs on the chat model unless overridden, as
+// "<provider>:<model>" like the model picker's ids.
+const CLASSIFIER_MODEL_ID = process.env.CLASSIFIER_MODEL_ID;
+const CLASSIFY_TIMEOUT_MS = 30_000;
+
+export async function runClassification(
+    message: string,
+    context: GuidanceContext,
+    chatModelId: string,
+    pageHref: string | undefined,
+    abortSignal?: AbortSignal
+): Promise<{
+    classification: Classification;
+    modelId: string;
+    latencyMs: number;
+}> {
+    const modelId = CLASSIFIER_MODEL_ID || chatModelId;
+    const started = Date.now();
+    const signals = [AbortSignal.timeout(CLASSIFY_TIMEOUT_MS)];
+    if (abortSignal) signals.push(abortSignal);
+    const { output } = await generateText({
+        model: getModel(modelId),
+        system: CLASSIFY_PROMPT_TEXT,
+        messages: [
+            {
+                role: 'user',
+                content: formatClassifierInput(message, context, pageHref),
+            },
+        ],
+        output: Output.object({ schema: RawClassificationSchema }),
+        abortSignal: AbortSignal.any(signals),
+    });
+    return {
+        classification: resolveClassification(output, context, message),
+        modelId,
+        latencyMs: Date.now() - started,
+    };
+}
+
 export async function runChat(
     uiMessages: UIMessage[],
     res: ServerResponse,
     model?: string,
-    pageHref?: string
+    pageHref?: string,
+    guidance?: GuidanceRequest
 ): Promise<void> {
     const modelId = model || AVAILABLE_MODELS[0]?.id;
     if (!modelId) {
@@ -352,23 +421,114 @@ export async function runChat(
         get_page_details: getPageDetailsTool,
         set_research_question: setResearchQuestionTool,
     };
+    const messages = await convertToModelMessages(uiMessages);
+    const streamReply = (replySystem: string) =>
+        streamText({
+            model: getModel(modelId),
+            system: replySystem,
+            tools,
+            reasoning: REASONING_EFFORT,
+            // The generic setting leaves Bedrock's `display` unset, where the
+            // other providers ask for summarized thinking; without it the
+            // sidebar's reasoning disclosure would stay empty on Bedrock.
+            // Merges with, rather than replaces, the reasoningConfig the
+            // generic setting produces.
+            providerOptions: {
+                bedrock: { reasoningConfig: { display: 'summarized' } },
+            },
+            stopWhen: stepCountIs(30),
+            messages,
+        });
 
-    const result = streamText({
-        model: getModel(modelId),
-        system,
-        tools,
-        reasoning: REASONING_EFFORT,
-        // The generic setting leaves Bedrock's `display` unset, where the other
-        // providers ask for summarized thinking; without it the sidebar's
-        // reasoning disclosure would stay empty on Bedrock. Merges with, rather
-        // than replaces, the reasoningConfig the generic setting produces.
-        providerOptions: {
-            bedrock: { reasoningConfig: { display: 'summarized' } },
+    if (!guidance) {
+        await streamReply(system).pipeUIMessageStreamToResponse(res);
+        return;
+    }
+
+    const stream = createUIMessageStream({
+        execute: async ({ writer }) => {
+            const classification = await classifyTurn(
+                uiMessages,
+                guidance,
+                modelId,
+                pageHref
+            );
+            if (classification.fresh) {
+                writer.write({
+                    type: 'data-classification',
+                    data: classification.value,
+                });
+            }
+            const replySystem = classification.value
+                ? `${system}\n\n${guidanceBlock(
+                      GUIDANCE_SECTIONS,
+                      classification.value
+                  )}`
+                : system;
+            writer.merge(streamReply(replySystem).toUIMessageStream());
         },
-        stopWhen: stepCountIs(30),
-        messages: await convertToModelMessages(uiMessages),
+        onError: err => describeError(err),
     });
-    await result.pipeUIMessageStreamToResponse(res);
+    await pipeUIMessageStreamToResponse({ response: res, stream });
+}
+
+// A new user message is classified; a continuation after a client-side tool
+// call (the last message is the assistant's) reuses the turn's classification.
+// A failed classification is logged and the reply goes ahead unguided.
+async function classifyTurn(
+    uiMessages: UIMessage[],
+    guidance: GuidanceRequest,
+    modelId: string,
+    pageHref: string | undefined
+): Promise<{ value: Classification | undefined; fresh: boolean }> {
+    const last = uiMessages.at(-1);
+    const previous = findLatestClassification(uiMessages);
+    if (last?.role !== 'user') return { value: previous, fresh: false };
+    const message = textOfMessage(last).slice(0, 4000);
+    if (!message) return { value: undefined, fresh: false };
+    const history = uiMessages
+        .slice(0, -1)
+        .filter(m => m.role === 'user')
+        .map(textOfMessage)
+        .filter(Boolean);
+    const context: GuidanceContext = {
+        ...guidance.context,
+        previous,
+        history: guidance.context.history.length
+            ? guidance.context.history
+            : history.slice(-6).map(h => h.slice(0, 600)),
+    };
+    const base = {
+        session_id: guidance.sessionId,
+        participant: guidance.participant,
+        thread_id: guidance.threadId,
+    };
+    try {
+        const {
+            classification,
+            modelId: usedModel,
+            latencyMs,
+        } = await runClassification(message, context, modelId, pageHref);
+        void logGuidanceEvent({
+            ...base,
+            event: 'classification',
+            payload: {
+                classification,
+                model: usedModel,
+                latency_ms: latencyMs,
+                page_href: pageHref ?? null,
+            },
+        });
+        return { value: classification, fresh: true };
+    } catch (err) {
+        console.error('classification failed:', describeError(err));
+        void logGuidanceEvent({
+            ...base,
+            event: 'classification_error',
+            payload: { message, error: describeError(err) },
+        });
+        return { value: undefined, fresh: false };
+    }
 }
 
 // No tools — everything the report needs (query results, page-state

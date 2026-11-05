@@ -7,6 +7,7 @@ export const TARGET_TYPES = [
     'visualization',
     'results-tab',
     'comparison-tab',
+    'control',
 ] as const;
 
 export type TargetType = typeof TARGET_TYPES[number];
@@ -87,12 +88,28 @@ function tokenize(text: string): Set<string> {
 
 /**
  * Keeps the candidates sharing the most words with the question, in their
- * original order. A no-op for lists already under the cap.
+ * original order. A no-op for lists already under the cap. Controls are
+ * always kept: there are only a few, and "where is…" questions rarely share
+ * words with them.
  */
 export function narrowCandidates(
     question: string,
     candidates: HighlightCandidate[],
     max = MAX_CANDIDATES
+): HighlightCandidate[] {
+    if (candidates.length <= max) return candidates;
+    const controls = candidates.filter(c => c.targetType === 'control');
+    const rest = candidates.filter(c => c.targetType !== 'control');
+    return [
+        ...controls,
+        ...narrowByWords(question, rest, max - controls.length),
+    ];
+}
+
+function narrowByWords(
+    question: string,
+    candidates: HighlightCandidate[],
+    max: number
 ): HighlightCandidate[] {
     if (candidates.length <= max) return candidates;
     const questionTokens = tokenize(question);

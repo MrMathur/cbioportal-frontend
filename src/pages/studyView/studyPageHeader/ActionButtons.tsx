@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ChatHighlightControl } from 'shared/components/chatSidebar/ChatHighlightControl';
 import _ from 'lodash';
 import { observer } from 'mobx-react';
 import { action, computed, makeObservable, observable } from 'mobx';
@@ -206,33 +207,35 @@ export default class ActionButtons extends React.Component<
 
                 {getServerConfig().skin_hide_download_controls ===
                     DownloadControlOption.SHOW_ALL && (
-                    <DefaultTooltip
-                        trigger={['hover']}
-                        placement={'top'}
-                        overlay={<span>{this.downloadButtonTooltip}</span>}
-                    >
-                        <button
-                            className="btn btn-default btn-sm"
-                            disabled={!this.props.loadingComplete}
-                            onClick={this.initiateDownload}
-                            data-event={serializeEvent({
-                                category: 'studyPage',
-                                action: 'dataDownload',
-                                label: this.props.store.queriedPhysicalStudyIds
-                                    .result,
-                            })}
-                            aria-label={this.downloadButtonTooltip}
+                    <ChatHighlightControl controlId="download">
+                        <DefaultTooltip
+                            trigger={['hover']}
+                            placement={'top'}
+                            overlay={<span>{this.downloadButtonTooltip}</span>}
                         >
-                            <If condition={this.downloadingData}>
-                                <Then>
-                                    <i className="fa fa-spinner fa-spin"></i>
-                                </Then>
-                                <Else>
-                                    <i className="fa fa-download"></i>
-                                </Else>
-                            </If>
-                        </button>
-                    </DefaultTooltip>
+                            <button
+                                className="btn btn-default btn-sm"
+                                disabled={!this.props.loadingComplete}
+                                onClick={this.initiateDownload}
+                                data-event={serializeEvent({
+                                    category: 'studyPage',
+                                    action: 'dataDownload',
+                                    label: this.props.store
+                                        .queriedPhysicalStudyIds.result,
+                                })}
+                                aria-label={this.downloadButtonTooltip}
+                            >
+                                <If condition={this.downloadingData}>
+                                    <Then>
+                                        <i className="fa fa-spinner fa-spin"></i>
+                                    </Then>
+                                    <Else>
+                                        <i className="fa fa-download"></i>
+                                    </Else>
+                                </If>
+                            </button>
+                        </DefaultTooltip>
+                    </ChatHighlightControl>
                 )}
             </div>
         );

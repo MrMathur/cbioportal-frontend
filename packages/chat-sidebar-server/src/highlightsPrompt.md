@@ -6,6 +6,7 @@ You are given the research question, the page the user is on, and a closed list 
 - `visualization` — a chart on the Study View summary page.
 - `results-tab` — a tab of the Results View (e.g. OncoPrint, Mutations, Plots, Survival).
 - `comparison-tab` — a tab of the Group Comparison page (e.g. Survival, Clinical, Genomic Alterations).
+- `control` — a control on the page: the Study View Groups button (where groups are saved and compared), the study search box, the gene/OQL query box, or a Download button.
 
 ## Rules
 
@@ -16,3 +17,4 @@ You are given the research question, the page the user is on, and a closed list 
 - `insight` is one sentence of at most 30 words on how to use the highlighted elements for the question. Leave it empty if nothing is relevant.
 - On study selection, prefer studies whose cancer type and description match the question; favour larger cohorts only as a tie-breaker.
 - On analysis pages (charts, tabs), prefer the elements that directly show the variables named in the question (e.g. survival, sex, age, a gene's alterations).
+- When the question asks how to do something or where a feature is ("how do I compare…", "where can I download…", "how do I find a study"), the matching `control` comes first.

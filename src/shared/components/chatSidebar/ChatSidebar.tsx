@@ -7,6 +7,7 @@ import { goToPage, normalizeBasePath } from './navigateTool';
 import { PortalWebMcp } from './portalWebMcp';
 import { PageEvent, PageEventPublisher } from './pageEvents';
 import { clearHighlights, setHighlights } from './highlightStore';
+import { getCatalog, getStudyContext } from './catalog';
 import {
     captureViewport,
     waitForNetworkIdle,
@@ -30,6 +31,21 @@ const MODE_STORAGE_KEY = 'chat-sidebar:mode';
 const LEGACY_OPEN_STORAGE_KEY = 'chat-sidebar:open';
 const WIDTH_STORAGE_KEY = 'chat-sidebar:width';
 const KEYBOARD_RESIZE_STEP = 20;
+// Opt-in flags passed on to the iframe: the guided assistant (request
+// classification, research question levels, earlier questions) and its
+// per-reply debug badge.
+const GUIDANCE_STORAGE_KEY = 'chat-sidebar:guidance';
+const GUIDANCE_DEBUG_STORAGE_KEY = 'chat-sidebar:guidanceDebug';
+// A user-study participant code, written to the guidance log.
+const PARTICIPANT_STORAGE_KEY = 'chat-sidebar:participant';
+
+function readFlag(key: string): boolean {
+    try {
+        return localStorage.getItem(key) === '1';
+    } catch {
+        return false;
+    }
+}
 
 function isChatSidebarMode(v: unknown): v is ChatSidebarMode {
     return v === 'expanded' || v === 'rail' || v === 'hidden';
@@ -264,12 +280,59 @@ export default class ChatSidebar extends React.Component<{}, {}> {
             setHighlights(e.data.annotations, e.data.focus);
             return;
         }
+        if (e.data?.type === 'chat-sidebar:requestCatalog') {
+            this.respondWithCatalog();
+            return;
+        }
+        if (e.data?.type === 'chat-sidebar:requestStudyContext') {
+            const studyIds = e.data.studyIds;
+            if (
+                Array.isArray(studyIds) &&
+                studyIds.length > 0 &&
+                studyIds.every(id => typeof id === 'string')
+            ) {
+                this.respondWithStudyContext(studyIds);
+            }
+            return;
+        }
         if (e.data?.type === 'chat-sidebar:requestScreenshot') {
             const requestId = e.data.requestId;
             this.captureAndRespond(requestId);
             return;
         }
     };
+
+    private postToIframe(message: object) {
+        this.iframeRef.current?.contentWindow?.postMessage(
+            message,
+            getChatOrigin()
+        );
+    }
+
+    private async respondWithCatalog() {
+        try {
+            const catalog = await getCatalog();
+            this.postToIframe({ type: 'chat-sidebar:catalog', catalog });
+        } catch (err) {
+            this.postToIframe({
+                type: 'chat-sidebar:catalog',
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
+    }
+
+    private async respondWithStudyContext(studyIds: string[]) {
+        try {
+            const context = await getStudyContext(studyIds);
+            this.postToIframe({ type: 'chat-sidebar:studyContext', context });
+        } catch (err) {
+            this.postToIframe({
+                type: 'chat-sidebar:studyContext',
+                studyIds,
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
+    }
 
     private async captureAndRespond(requestId: string) {
         // Waits for the page to settle before capturing — a mid-fetch or
@@ -299,6 +362,16 @@ export default class ChatSidebar extends React.Component<{}, {}> {
             'portalUrl',
             window.location.origin + normalizeBasePath(getLoadConfig().basePath)
         );
+        if (readFlag(GUIDANCE_STORAGE_KEY)) params.set('guidance', '1');
+        if (readFlag(GUIDANCE_DEBUG_STORAGE_KEY)) {
+            params.set('guidanceDebug', '1');
+        }
+        try {
+            const participant = localStorage.getItem(PARTICIPANT_STORAGE_KEY);
+            if (participant) params.set('participant', participant);
+        } catch {
+            /* no participant code */
+        }
         return `${getChatServerBase()}/?${params.toString()}`;
     }
 

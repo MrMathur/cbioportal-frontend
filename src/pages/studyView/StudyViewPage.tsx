@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { ChatHighlightControl } from 'shared/components/chatSidebar/ChatHighlightControl';
 import _ from 'lodash';
 import { inject, Observer, observer } from 'mobx-react';
 import { MSKTab, MSKTabs } from '../../shared/components/MSKTabs/MSKTabs';
@@ -552,50 +553,52 @@ export default class StudyViewPage extends React.Component<
                 {/*        <WrappedTour/>*/}
                 {/*    </InfoBeacon>*/}
                 {/*</If>*/}
-                <DefaultTooltip
-                    trigger={['click']}
-                    placement="bottomLeft"
-                    destroyTooltipOnHide={true}
-                    onPopupAlign={(tooltipEl: any) => {
-                        const arrowEl = tooltipEl.querySelector(
-                            '.rc-tooltip-arrow'
-                        );
-                        arrowEl.style.right = '10px';
-                    }}
-                    getTooltipContainer={() =>
-                        document.getElementById(
-                            'comparisonGroupManagerContainer'
-                        )!
-                    }
-                    overlay={
-                        <div style={{ width: 350 }}>
-                            <ComparisonGroupManager
-                                store={this.store}
-                                shareGroups={this.openShareUrlModal}
-                                onGroupColorChange={
-                                    this.store.onGroupColorChange
-                                }
-                            />
-                        </div>
-                    }
-                >
-                    <button
-                        className={classNames('btn btn-primary btn-xs', {
-                            active: this.store.showComparisonGroupUI,
-                        })}
-                        id={'groupManagementButton'}
-                        data-test="groups-button"
-                        aria-pressed={this.store.showComparisonGroupUI}
-                        style={{ marginLeft: '10px' }}
-                        data-event={serializeEvent({
-                            action: 'openGroupManagement',
-                            label: '',
-                            category: 'groupComparison',
-                        })}
+                <ChatHighlightControl controlId="study-view-compare">
+                    <DefaultTooltip
+                        trigger={['click']}
+                        placement="bottomLeft"
+                        destroyTooltipOnHide={true}
+                        onPopupAlign={(tooltipEl: any) => {
+                            const arrowEl = tooltipEl.querySelector(
+                                '.rc-tooltip-arrow'
+                            );
+                            arrowEl.style.right = '10px';
+                        }}
+                        getTooltipContainer={() =>
+                            document.getElementById(
+                                'comparisonGroupManagerContainer'
+                            )!
+                        }
+                        overlay={
+                            <div style={{ width: 350 }}>
+                                <ComparisonGroupManager
+                                    store={this.store}
+                                    shareGroups={this.openShareUrlModal}
+                                    onGroupColorChange={
+                                        this.store.onGroupColorChange
+                                    }
+                                />
+                            </div>
+                        }
                     >
-                        {getButtonNameWithDownPointer('Groups')}
-                    </button>
-                </DefaultTooltip>
+                        <button
+                            className={classNames('btn btn-primary btn-xs', {
+                                active: this.store.showComparisonGroupUI,
+                            })}
+                            id={'groupManagementButton'}
+                            data-test="groups-button"
+                            aria-pressed={this.store.showComparisonGroupUI}
+                            style={{ marginLeft: '10px' }}
+                            data-event={serializeEvent({
+                                action: 'openGroupManagement',
+                                label: '',
+                                category: 'groupComparison',
+                            })}
+                        >
+                            {getButtonNameWithDownPointer('Groups')}
+                        </button>
+                    </DefaultTooltip>
+                </ChatHighlightControl>
             </>
         );
     }

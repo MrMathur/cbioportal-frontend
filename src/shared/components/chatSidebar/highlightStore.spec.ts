@@ -37,6 +37,11 @@ describe('highlightStore', () => {
         );
     });
 
+    it('accepts controls as a target type', () => {
+        setHighlights([annotation('study-view-compare', 1, 'control')], false);
+        assert.equal(getHighlight('control', 'study-view-compare')?.rank, 1);
+    });
+
     it('drops malformed entries and non-array payloads', () => {
         setHighlights(
             [

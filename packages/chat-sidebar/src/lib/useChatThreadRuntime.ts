@@ -13,7 +13,15 @@ import { useAISDKRuntime } from '@assistant-ui/ai-sdk';
 import { AuthErrorStatus, getSelectedModel, setAuthError } from './chatSession';
 import { notifyNavigate, resolvePortalLink } from './portal-link';
 import { detailsForModel, getLatestPageEvents } from './page-events';
-import { setResearchQuestionFromChat } from './researchQuestion';
+import {
+    applyClassification,
+    setLatestFinding,
+    setResearchQuestionFromChat,
+} from './researchQuestion';
+import { isClassification } from './classification';
+import { guidanceEnabled } from './guidanceFlags';
+import { buildGuidancePayload } from './guidanceRequest';
+import { findingFromReply } from './topics';
 
 export class ChatAuthError extends Error {
     constructor(readonly status: AuthErrorStatus) {
@@ -53,6 +61,33 @@ export function useChatThreadRuntime(): AssistantRuntime {
                     model: getSelectedModel(),
                     pageHref: getLatestPageEvents().snapshot?.href ?? null,
                 }),
+                // The guided assistant's classification context, built from
+                // the message being sent. Mirrors the default request body
+                // otherwise.
+                prepareSendMessagesRequest: async ({
+                    id,
+                    messages,
+                    body,
+                    trigger,
+                    messageId,
+                }) => {
+                    const ids = threadIdsRef.current;
+                    const guidance = await buildGuidancePayload(
+                        messages,
+                        ids.remoteId,
+                        ids.threadId
+                    );
+                    return {
+                        body: {
+                            ...body,
+                            id,
+                            messages,
+                            trigger,
+                            messageId,
+                            ...(guidance ? { guidance } : {}),
+                        },
+                    };
+                },
             }),
         []
     );
@@ -109,6 +144,34 @@ export function useChatThreadRuntime(): AssistantRuntime {
                 });
                 return;
             }
+        },
+        onData: dataPart => {
+            if (
+                guidanceEnabled &&
+                dataPart.type === 'data-classification' &&
+                isClassification(dataPart.data)
+            ) {
+                const ids = threadIdsRef.current;
+                applyClassification(
+                    ids.remoteId,
+                    ids.threadId,
+                    dataPart.data,
+                    getLatestPageEvents().settledSnapshot?.href
+                );
+            }
+        },
+        onFinish: ({ message, isAbort, isError }) => {
+            if (!guidanceEnabled || isAbort || isError) return;
+            const lastText = [...message.parts]
+                .reverse()
+                .find(part => part.type === 'text');
+            const finding =
+                lastText?.type === 'text'
+                    ? findingFromReply(lastText.text)
+                    : undefined;
+            if (!finding) return;
+            const ids = threadIdsRef.current;
+            setLatestFinding(ids.remoteId, ids.threadId, finding);
         },
         onError: error => {
             if (error instanceof ChatAuthError) setAuthError(error.status);
