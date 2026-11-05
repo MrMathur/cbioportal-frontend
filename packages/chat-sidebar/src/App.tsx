@@ -17,6 +17,7 @@ import { ToolFallback } from '@/components/assistant-ui/elements/tool-fallback.a
 import { ChatHeader } from '@/components/ChatHeader';
 import { ResearchQuestionBar } from '@/components/ResearchQuestionBar';
 import { EarlierQuestions } from '@/components/EarlierQuestions';
+import { BadgePlanSync } from '@/components/BadgePlanSync';
 import { guidanceEnabled } from '@/lib/guidanceFlags';
 import { SidebarRail } from '@/components/SidebarRail';
 import { useCrossTabSync } from '@/hooks/use-cross-tab-sync';
@@ -77,6 +78,7 @@ const SILENT_TOOLS = new Set([
     'go_to_page',
     'get_page_details',
     'set_research_question',
+    'set_highlights',
 ]);
 
 // Stands in for the whole sidebar, header and chat list included: there is
@@ -218,6 +220,7 @@ export function App() {
                             <ChatHeader models={models} />
                             <ResearchQuestionBar />
                             {guidanceEnabled && <EarlierQuestions />}
+                            {guidanceEnabled && <BadgePlanSync />}
                             <div className="min-h-0 flex-1">
                                 <Thread components={THREAD_COMPONENTS} />
                             </div>

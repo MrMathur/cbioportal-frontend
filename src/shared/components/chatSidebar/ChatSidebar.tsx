@@ -14,7 +14,15 @@ import { getChatServerBase, getChatOrigin } from './chatServerBase';
 import { goToPage, normalizeBasePath } from './navigateTool';
 import { PortalWebMcp } from './portalWebMcp';
 import { PageEvent, PageEventPublisher } from './pageEvents';
-import { clearHighlights, setHighlights } from './highlightStore';
+import {
+    clearHighlights,
+    emphasizeHighlight,
+    setBadgeHoverListener,
+    setHighlights,
+    setHoveredHighlight,
+} from './highlightStore';
+import { ChatHighlightEdges } from './ChatHighlightEdges';
+import { scrollToHighlight } from './highlightScroll';
 import { getCatalog, getStudyContext } from './catalog';
 import {
     captureViewport,
@@ -190,6 +198,10 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         // Also registers go_to_page as a native WebMCP tool where supported;
         // no-op otherwise.
         this.webMcp.start();
+        // A linked badge hovered on the page marks its sentence in the chat.
+        setBadgeHoverListener(key =>
+            this.postToIframe({ type: 'chat-sidebar:badgeHover', key })
+        );
     }
 
     componentWillUnmount() {
@@ -200,6 +212,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         this.disposeReservedWidth?.();
         this.applyReservedWidth(0);
         clearHighlights();
+        setBadgeHoverListener(undefined);
         this.webMcp.stop();
         this.pageEvents.stop();
     }
@@ -327,6 +340,21 @@ export default class ChatSidebar extends React.Component<{}, {}> {
             setHighlights(e.data.annotations, e.data.focus);
             return;
         }
+        // A number chip in the chat is hovered (key null: no longer), or
+        // clicked: pulse its badge, or scroll its element into view.
+        if (e.data?.type === 'chat-sidebar:badgeHover') {
+            setHoveredHighlight(
+                typeof e.data.key === 'string' ? e.data.key : null
+            );
+            return;
+        }
+        if (e.data?.type === 'chat-sidebar:badgeScroll') {
+            if (typeof e.data.key === 'string') {
+                scrollToHighlight(e.data.key);
+                emphasizeHighlight(e.data.key);
+            }
+            return;
+        }
         if (e.data?.type === 'chat-sidebar:requestCatalog') {
             this.respondWithCatalog();
             return;
@@ -430,6 +458,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         if (this.resizing) panelClassName += ' chat-sidebar-panel-resizing';
         return (
             <>
+                <ChatHighlightEdges />
                 {this.mode === 'hidden' && (
                     <button
                         type="button"

@@ -24,6 +24,12 @@ import { isClassification } from './classification';
 import { guidanceEnabled } from './guidanceFlags';
 import { buildGuidancePayload } from './guidanceRequest';
 import { findingFromReply } from './topics';
+import { buildPlan, markKey, RequestedMark } from './badgePlan';
+import { setActivePlan } from './badgeState';
+import { logGuidanceEvent } from './guidanceLog';
+import { markNavigationStarted, waitForPageReady } from './navigationState';
+import { markableTargets, pageCandidates, pageTypeOf } from './pageTargets';
+import { latestParts } from './messageParts';
 import { syncPortalToClassification } from './portalSync';
 
 export class ChatAuthError extends Error {
@@ -107,12 +113,78 @@ export function useChatThreadRuntime(): AssistantRuntime {
                 const navigated = Boolean(path);
                 if (path) {
                     expectPageNavigation();
+                    markNavigationStarted(
+                        getLatestPageEvents().settledSnapshot?.href
+                    );
                     notifyNavigate(path);
                 }
+                // In guided chats, the reply's marks go on the page it just
+                // opened: wait for it, and list what can be marked there.
+                const page =
+                    guidanceEnabled && navigated
+                        ? await waitForPageReady()
+                        : undefined;
                 addToolOutput({
                     tool: 'go_to_page',
                     toolCallId: toolCall.toolCallId,
-                    output: { navigated },
+                    output: page
+                        ? {
+                              navigated,
+                              page: {
+                                  type: pageTypeOf(page),
+                                  elements: markableTargets(page),
+                              },
+                          }
+                        : { navigated },
+                });
+                return;
+            }
+            if (toolCall.toolName === 'set_highlights') {
+                const page = await waitForPageReady();
+                const input = toolCall.input as { marks?: unknown };
+                const requested = Array.isArray(input?.marks)
+                    ? (input.marks as RequestedMark[])
+                    : [];
+                const parts = latestParts(chat.messages);
+                const { plan, rejected } = buildPlan(
+                    requested,
+                    pageCandidates(page),
+                    parts
+                );
+                const replyId = chat.messages.at(-1)?.id;
+                if (replyId) {
+                    setActivePlan({ messageId: replyId, plan, linked: true });
+                }
+                const ids = threadIdsRef.current;
+                logGuidanceEvent('badge_plan', ids.remoteId ?? ids.threadId, {
+                    message_id: replyId,
+                    marks: plan.marks.map(m => ({
+                        token: m.token,
+                        target: markKey(m),
+                        part: m.part,
+                        tooltip: m.tooltip,
+                    })),
+                    rejected,
+                    href: page?.href ?? null,
+                });
+                addToolOutput({
+                    tool: 'set_highlights',
+                    toolCallId: toolCall.toolCallId,
+                    output: {
+                        accepted: plan.marks.map(m => ({
+                            token: m.token,
+                            cue: m.cue,
+                            element: m.label,
+                            part: m.part,
+                            tooltip: m.tooltip,
+                            ...(m.elsewhere ? { onAnotherPage: true } : {}),
+                        })),
+                        rejected,
+                        reminder: plan.marks.length
+                            ? 'Start each matching sentence or list item with its token, each token once.'
+                            : 'No marks were accepted: write the answer without tokens.',
+                        plan,
+                    },
                 });
                 return;
             }

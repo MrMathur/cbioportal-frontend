@@ -112,6 +112,8 @@ function raw(overrides: Partial<RawClassification> = {}): RawClassification {
         study_is_collection: false,
         uses_open_page: false,
         multi_part: false,
+        parts: [],
+        part_answerability: [],
         answerability: 'ui',
         move: null,
         drafts: {
@@ -688,4 +690,152 @@ test('an exploring question keeps only the broad aim', () => {
     assert.equal(c.drafts.broad_aim, 'aim');
     assert.equal(c.drafts.working_question, '');
     assert.equal(c.drafts.concrete_analysis, '');
+});
+
+test('parts count only for a multi-part message with two or more', () => {
+    const multi = resolveClassification(
+        raw({
+            multi_part: true,
+            parts: ['Sex', 'Age', 'age', ' ', 'All', 'Race'],
+        }),
+        ctx(),
+        'm'
+    );
+    assert.deepEqual(multi.parts, ['Sex', 'Age', 'Race']);
+    const single = resolveClassification(
+        raw({ multi_part: false, parts: ['Sex'] }),
+        ctx(),
+        'm'
+    );
+    assert.deepEqual(single.parts, []);
+    const one = resolveClassification(
+        raw({ multi_part: true, parts: ['Sex'] }),
+        ctx(),
+        'm'
+    );
+    assert.deepEqual(one.parts, []);
+});
+
+test('marks: the reply marks where the portal will be', async () => {
+    const { markPage, markTargetsFor } = await import('./marks.js');
+    const l3 = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot('specified', 'breast cancer', ['brca']),
+                entity: slot('specified', 'TP53'),
+                measure: slot('specified', 'mutation frequency'),
+            },
+        }),
+        ctx(),
+        'TP53 in breast cancer'
+    );
+    assert.equal(l3.level, 'L3');
+    assert.equal(markPage(l3, 'study'), 'home');
+    const home = markTargetsFor(
+        l3,
+        ctx({ pageType: 'study', pageTargets: [] })
+    );
+    // The classification's study options come first, then the home controls.
+    assert.equal(home.targets[0].targetType, 'study');
+    assert.match(home.targets[0].label, /METABRIC/);
+    assert.ok(home.targets.some(t => t.targetId === 'study-search'));
+
+    const l4 = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot('specified', 'breast cancer', ['brca']),
+                study: slot('specified', 'METABRIC', ['brca_metabric']),
+                entity: slot('specified', 'TP53'),
+                measure: slot('specified', 'mutation frequency'),
+            },
+        }),
+        ctx(),
+        'm'
+    );
+    const pageTargets = [
+        {
+            targetType: 'visualization',
+            targetId: 'chart1',
+            label: 'Mutated Genes',
+        },
+    ];
+    const current = markTargetsFor(l4, ctx({ pageType: 'study', pageTargets }));
+    assert.equal(current.page, 'current');
+    assert.deepEqual(current.targets, pageTargets);
+});
+
+test('guidance block: marks rules per level, none out of scope', () => {
+    const sections = parseSections(
+        readFileSync(new URL('./guidancePrompt.md', import.meta.url), 'utf-8')
+    );
+    for (const name of [
+        'marks',
+        'marks-L1',
+        'marks-L2',
+        'marks-L3',
+        'marks-L4',
+        'marks-interface',
+        'marks-catalog',
+    ]) {
+        assert.ok(sections.get(name), `section ${name}`);
+    }
+    const explore = resolveClassification(raw({ goal: 'explore' }), ctx(), 'm');
+    const block = guidanceBlock(sections, explore, ctx({ pageType: 'study' }));
+    assert.match(block, /Marking the portal/);
+    assert.match(block, /a result mark on every study you list/);
+    assert.match(block, /Elements you can mark/);
+    const oos = resolveClassification(
+        raw({ request_type: 'out_of_scope', oos_subtype: 'knowledge' }),
+        ctx(),
+        'm'
+    );
+    assert.doesNotMatch(
+        guidanceBlock(sections, oos, ctx()),
+        /Marking the portal/
+    );
+    // Without a context (unguided path), no marks.
+    assert.doesNotMatch(guidanceBlock(sections, explore), /Marking the portal/);
+});
+
+test('a multi-part message is answerable when any part is', () => {
+    const c = resolveClassification(
+        raw({
+            multi_part: true,
+            parts: ['Sex', 'Age', 'Race'],
+            part_answerability: ['ui', 'ui', 'custom'],
+            answerability: 'custom',
+        }),
+        ctx(),
+        'm'
+    );
+    assert.deepEqual(c.parts, ['Sex', 'Age', 'Race']);
+    assert.deepEqual(c.part_answerability, ['ui', 'ui', 'custom']);
+    assert.equal(c.answerability, 'ui');
+    const none = resolveClassification(
+        raw({
+            multi_part: true,
+            parts: ['A', 'B'],
+            part_answerability: ['custom', 'unavailable'],
+            answerability: 'ui',
+        }),
+        ctx(),
+        'm'
+    );
+    assert.equal(none.answerability, 'custom');
+    // A missing per-part value takes the overall one; dropped parts keep
+    // their answerability aligned.
+    const short = resolveClassification(
+        raw({
+            multi_part: true,
+            parts: ['Sex', 'sex', 'Age'],
+            part_answerability: ['unavailable', 'ui'],
+            answerability: 'ui',
+        }),
+        ctx(),
+        'm'
+    );
+    assert.deepEqual(short.parts, ['Sex', 'Age']);
+    assert.deepEqual(short.part_answerability, ['unavailable', 'ui']);
 });

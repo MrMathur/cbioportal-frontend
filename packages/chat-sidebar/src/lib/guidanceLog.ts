@@ -15,7 +15,11 @@ export type GuidanceEvent =
     | 'option_pick'
     | 'send_question'
     | 'page_action'
-    | 'portal_navigation';
+    | 'portal_navigation'
+    | 'badge_plan'
+    | 'badge_mismatch'
+    | 'badge_click'
+    | 'part_select';
 
 export function logGuidanceEvent(
     event: GuidanceEvent,

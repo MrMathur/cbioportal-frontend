@@ -47,17 +47,18 @@ export type SlotSource = 'chat' | 'user' | 'page';
 
 const RawSlotSchema = z.object({
     status: z.enum(['specified', 'ambiguous', 'missing']),
-    value: z
-        .string()
-        .nullable()
-        .describe('The slot value in the codebook format, or null if missing'),
-    options: z
-        .array(z.string())
-        .describe('Choices for an ambiguous slot; empty otherwise'),
+    value: z.string().nullable(),
+    options: z.array(z.string()),
+});
+
+// Cohort and study are also matched against the portal's catalog. The other
+// slots leave the field out: the provider compiles the schema into a grammar
+// with a size limit, and six copies of it don't fit.
+const RawCatalogSlotSchema = RawSlotSchema.extend({
     matched_ids: z
         .array(z.string())
         .describe(
-            'cohort: cancer type ids from the candidate list; study: study ids from the candidate list; empty for other slots'
+            'cohort: cancer type ids from the candidate list; study: study ids from the candidate list'
         ),
 });
 
@@ -68,8 +69,8 @@ export const RawClassificationSchema = z.object({
         .nullable(),
     goal: z.enum(GOALS).nullable(),
     slots: z.object({
-        cohort: RawSlotSchema,
-        study: RawSlotSchema,
+        cohort: RawCatalogSlotSchema,
+        study: RawCatalogSlotSchema,
         entity: RawSlotSchema,
         measure: RawSlotSchema,
         groups: RawSlotSchema,
@@ -89,6 +90,16 @@ export const RawClassificationSchema = z.object({
             'True when the message explicitly refers to what is open in the portal ("this study", "these patients", "my selection", "the current filters")'
         ),
     multi_part: z.boolean(),
+    parts: z
+        .array(z.string())
+        .describe(
+            'When multi_part: a short name per separate answer, in the order asked (e.g. ["Sex", "Age", "Race"]); empty otherwise'
+        ),
+    part_answerability: z
+        .array(z.enum(['ui', 'custom', 'unavailable']))
+        .describe(
+            'When multi_part: the answerability of each part on its own, in the same order as parts; empty otherwise'
+        ),
     answerability: z.enum(['ui', 'custom', 'unavailable']),
     move: z.enum(MOVES).nullable(),
     drafts: z.object({
@@ -123,6 +134,12 @@ export interface Classification {
     level: Level | null;
     guidance_degree: GuidanceDegree;
     multi_part: boolean;
+    // The separate answers a multi-part message asks for; empty otherwise.
+    parts: string[];
+    // Each part's answerability, in the order of parts.
+    part_answerability: Answerability[];
+    // For a multi-part message, derived from its parts: 'ui' when any part
+    // has a view in the portal.
     answerability: Answerability;
     move: Move | null;
     // Whether the study open on the page fits the question, so its study and
@@ -179,6 +196,15 @@ export interface GuidanceContext {
     previous?: Classification;
     // Earlier user messages in this chat, oldest first.
     history: string[];
+    // The open page's type and the elements on it the reply may mark
+    // (marks.ts); absent when the sidebar didn't send them.
+    pageType?: string;
+    pageTargets?: {
+        targetType: string;
+        targetId: string;
+        label: string;
+        description?: string;
+    }[];
 }
 
 const MAX_OPTIONS = 8;
@@ -496,6 +522,46 @@ function applyFixed(
     };
 }
 
+const MAX_PARTS = 5;
+
+// Parts only count for a multi-part message, at least two, named once each,
+// each with its own answerability (the overall one where it's missing).
+export function cleanParts(
+    raw: RawClassification
+): { name: string; answerability: Answerability }[] {
+    if (!raw.multi_part) return [];
+    const seen = new Set<string>();
+    const parts: { name: string; answerability: Answerability }[] = [];
+    raw.parts.forEach((part, index) => {
+        const name = part.trim().slice(0, 40);
+        const key = name.toLowerCase();
+        if (!name || key === 'all' || key === 'shared' || seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+        parts.push({
+            name,
+            answerability: raw.part_answerability[index] ?? raw.answerability,
+        });
+    });
+    return parts.length >= 2 ? parts.slice(0, MAX_PARTS) : [];
+}
+
+/**
+ * A multi-part message can't be answered by one view, but its parts may each
+ * have one: it is answerable in the portal when any part is, and otherwise
+ * takes the best of its parts' answers.
+ */
+export function overallAnswerability(
+    parts: { answerability: Answerability }[],
+    fallback: Answerability
+): Answerability {
+    if (parts.length === 0) return fallback;
+    const kinds = parts.map(p => p.answerability);
+    if (kinds.includes('ui')) return 'ui';
+    return kinds.includes('custom') ? 'custom' : 'unavailable';
+}
+
 function isNewTopic(raw: RawClassification, context: GuidanceContext): boolean {
     return Boolean(context.previous) && raw.move === 'new';
 }
@@ -553,6 +619,7 @@ export function resolveClassification(
     }
 
     const goal = isData ? raw.goal : null;
+    const parts = cleanParts(raw);
     const exploring = goal === 'explore';
     const newTopic = isNewTopic(raw, context);
     const needsGroups =
@@ -576,7 +643,9 @@ export function resolveClassification(
         level,
         guidance_degree,
         multi_part: raw.multi_part,
-        answerability: raw.answerability,
+        parts: parts.map(p => p.name),
+        part_answerability: parts.map(p => p.answerability),
+        answerability: overallAnswerability(parts, raw.answerability),
         move: context.previous ? raw.move : null,
         open_study_applies: openStudyApplies,
         drafts: {
@@ -757,11 +826,40 @@ export function parseGuidanceContext(
             previous: isPreviousClassification(v.previous)
                 ? v.previous
                 : undefined,
+            pageType: str(v.pageType, 40) || undefined,
+            pageTargets: parsePageTargets(v.pageTargets),
         },
         sessionId: str(v.sessionId, 100),
         participant: str(v.participant, 100),
         threadId: str(v.threadId, 100),
     };
+}
+
+const MAX_PAGE_TARGETS = 80;
+
+function parsePageTargets(value: unknown): GuidanceContext['pageTargets'] {
+    if (!Array.isArray(value)) return undefined;
+    const targets: NonNullable<GuidanceContext['pageTargets']> = [];
+    for (const item of value.slice(0, MAX_PAGE_TARGETS)) {
+        const t = item as Record<string, unknown> | null;
+        if (
+            t &&
+            typeof t.targetType === 'string' &&
+            typeof t.targetId === 'string' &&
+            typeof t.label === 'string'
+        ) {
+            targets.push({
+                targetType: t.targetType.slice(0, 40),
+                targetId: t.targetId.slice(0, 200),
+                label: t.label.slice(0, 200),
+                description:
+                    typeof t.description === 'string'
+                        ? t.description.slice(0, 200)
+                        : undefined,
+            });
+        }
+    }
+    return targets;
 }
 
 // A classification the sidebar sends back for a retry, as the previous turn.

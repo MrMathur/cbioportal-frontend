@@ -4,6 +4,7 @@ import { guidanceEnabled } from './guidanceFlags';
 import { logGuidanceEvent } from './guidanceLog';
 import { getLatestPageEvents, getPageType } from './page-events';
 import { notifyNavigate } from './portal-link';
+import { markNavigationStarted } from './navigationState';
 import {
     CurrentPage,
     pathFor,
@@ -30,6 +31,7 @@ function go(
     if (!target) return;
     const path = pathFor(target);
     expectPageNavigation();
+    markNavigationStarted(getLatestPageEvents().settledSnapshot?.href);
     notifyNavigate(path);
     const research = getActiveResearch();
     logGuidanceEvent(

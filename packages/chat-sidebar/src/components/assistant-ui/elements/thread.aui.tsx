@@ -1,5 +1,6 @@
 'use client';
 
+import { MarksLegend, PartChips } from '@/components/AnswerMarks';
 import { ClassificationBadge } from '@/components/ClassificationBadge';
 import {
     ComposerAttachments,
@@ -617,6 +618,7 @@ const AssistantMessage: FC = () => {
             data-role="assistant"
             className="fade-in slide-in-from-bottom-1 animate-in relative -mb-7.5 pb-7.5 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
         >
+            <PartChips />
             <div
                 data-slot="aui_assistant-message-content"
                 className="text-foreground px-2 leading-relaxed wrap-break-word"
@@ -706,6 +708,7 @@ const AssistantMessage: FC = () => {
                 <MessageError />
             </div>
 
+            <MarksLegend />
             <div
                 data-slot="aui_assistant-message-footer"
                 className={cn('ms-2 flex items-center', ACTION_BAR_HEIGHT)}

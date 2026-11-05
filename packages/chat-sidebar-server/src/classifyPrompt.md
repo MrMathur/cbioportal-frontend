@@ -64,7 +64,9 @@ Slots fixed in earlier turns stay specified when this message is a follow-up of 
 
 - `uses_open_page`: true when the message explicitly refers to what is open in the portal: "this study", "these patients", "the selected samples", "my current filters", "what's on screen". False otherwise, including when the message merely could be answered on the open page.
 - `multi_part`: true when the message asks for two or more separate answers. Test: could one view, table or plot answer all of it?
-- `answerability`: `ui` when a portal view (Study View, Results View, Group Comparison, Plots, Patient View) can answer it; `custom` when it needs a custom query or analysis outside the portal's views; `unavailable` when the portal has no such data.
+- `parts`: when `multi_part` is true, one short name (1–3 words) per separate answer, in the order asked: "How does KRAS mutation frequency differ by sex, age and race?" → ["Sex", "Age", "Race"]. Empty when `multi_part` is false.
+- `part_answerability`: when `multi_part` is true, the `answerability` of each part on its own, in the same order as `parts`; empty otherwise. Judge each part as if it were asked alone. That one view can't answer all the parts at once is what makes the message multi-part; it doesn't make any part `custom`. E.g. "KRAS mutation frequency by sex, age and race": each part is `ui` (Study View with a KRAS filter and the Sex, Age or Race chart, or Group Comparison by that attribute).
+- `answerability`: for a multi-part message, the answerability of its parts taken together (code derives it from `part_answerability`). Otherwise: `ui` when a portal view (Study View, Results View, Group Comparison, Plots, Patient View) can answer it; `custom` when it needs a custom query or analysis outside the portal's views; `unavailable` when the portal has no such data.
 - `move` (only when there is a previous classification; null otherwise), comparing with the previous question:
   - `same`: the same question again, rephrased or repeated.
   - `refine`: narrower: adds a filter, a subtype, an endpoint, a specific study.

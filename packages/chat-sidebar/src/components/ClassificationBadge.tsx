@@ -1,4 +1,4 @@
-import { FC, useState } from 'react';
+import { FC, useLayoutEffect, useRef, useState } from 'react';
 import { BugIcon } from 'lucide-react';
 import {
     Classification,
@@ -31,10 +31,24 @@ export const ClassificationBadge: FC<{ data: unknown; failed?: boolean }> = ({
     failed,
 }) => {
     const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+    // The reply's work blocks each render the classification part; show it
+    // once per reply, in the first place.
+    useLayoutEffect(() => {
+        const el = ref.current;
+        const first = el
+            ?.closest('[data-role="assistant"]')
+            ?.querySelector('[data-classification-badge]');
+        if (el) el.hidden = first !== el;
+    });
     if (!guidanceDebug) return null;
     if (failed) {
         return (
-            <div className="my-1 inline-flex items-center gap-1 rounded-md border border-dashed border-red-500/60 bg-red-50 px-1.5 py-0.5 font-mono text-[11px] text-red-900 dark:bg-red-950/40 dark:text-red-200">
+            <div
+                ref={ref}
+                data-classification-badge=""
+                className="my-1 inline-flex items-center gap-1 rounded-md border border-dashed border-red-500/60 bg-red-50 px-1.5 py-0.5 font-mono text-[11px] text-red-900 dark:bg-red-950/40 dark:text-red-200"
+            >
                 <BugIcon className="size-3 shrink-0" aria-hidden />
                 classification failed: reply unguided
             </div>
@@ -42,7 +56,11 @@ export const ClassificationBadge: FC<{ data: unknown; failed?: boolean }> = ({
     }
     if (!isClassification(data)) return null;
     return (
-        <div className="my-1 text-[11px]">
+        <div
+            ref={ref}
+            data-classification-badge=""
+            className="my-1 text-[11px]"
+        >
             <button
                 type="button"
                 onClick={() => setOpen(o => !o)}

@@ -180,3 +180,17 @@ body,
 @custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
 
 @custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* Guided answers: the sentence of a badge hovered on the portal, and the
+   sections of the parts not selected in a multi-part answer. */
+.chat-mark-sentence-active {
+    background: rgb(55 134 194 / 0.12);
+    border-radius: 4px;
+    box-shadow: 0 0 0 3px rgb(55 134 194 / 0.12);
+    transition: background-color 0.15s ease;
+}
+
+[data-part-dimmed] {
+    opacity: 0.35;
+    transition: opacity 0.15s ease;
+}

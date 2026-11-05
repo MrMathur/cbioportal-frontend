@@ -281,7 +281,7 @@ async function getMcpTools(): Promise<ToolSet> {
 // No `execute` — client-side tool; the browser navigates and reports back
 // via addToolOutput.
 const goToPageTool = tool({
-    description: `Immediately navigates the user's browser to a cBioPortal URL — the user is taken there right away, with no confirmation step. Once the navigate_to_* tools have produced URL(s), call this yourself, without waiting to be asked, with the main one: the page that most directly answers the user's request. Call it at most once per reply. Still include that URL and any others as markdown links in your reply, so the user can open them manually if navigation fails. Don't call it when the user is already on that page or is asking about the page they're on. Resolve the correct URL first (e.g. via resolve_and_route / navigate_to_* tools) if you don't already have it.`,
+    description: `Immediately navigates the user's browser to a cBioPortal URL — the user is taken there right away, with no confirmation step. Once the navigate_to_* tools have produced URL(s), call this yourself, without waiting to be asked, with the main one: the page that most directly answers the user's request. Call it at most once per reply. Still include that URL and any others as markdown links in your reply, so the user can open them manually if navigation fails. In guided chats the output also lists the elements of the new page that set_highlights can mark. Don't call it when the user is already on that page or is asking about the page they're on. Resolve the correct URL first (e.g. via resolve_and_route / navigate_to_* tools) if you don't already have it.`,
     inputSchema: z.object({
         url: z
             .string()
@@ -308,6 +308,43 @@ const setResearchQuestionTool = tool({
             .describe(
                 'The research question, as one concise sentence in the user\'s words, e.g. "Does TP53 mutation status affect survival in breast cancer?"'
             ),
+    }),
+});
+
+// Also client-side, and offered only in guided turns: the sidebar checks the
+// marks against the page, numbers the results and draws the badges, then
+// returns the accepted marks for the reply's text to refer to.
+const setHighlightsTool = tool({
+    description:
+        "Marks elements of the user's cBioPortal page with badges that the text of your answer refers to. Call it before writing the answer's text (after go_to_page, when you navigate); if it rejects a mark you need, call it once more with the full corrected list, which replaces the earlier one. Result marks are numbered 1, 2, 3… in the order you give them. The output lists the accepted marks and their tokens ([[1]], [[context]], [[next]]); start each matching sentence of your answer with its token.",
+    inputSchema: z.object({
+        marks: z
+            .array(
+                z.object({
+                    cue: z
+                        .enum(['context', 'result', 'next_step'])
+                        .describe(
+                            'context: the cohort the user is looking at; result: where the answer is (numbered, reading order); next_step: one control or view to open next'
+                        ),
+                    target: z
+                        .string()
+                        .describe(
+                            'An element copied exactly from the elements list as "<targetType>:<targetId>"; "context" for the context mark'
+                        ),
+                    tooltip: z
+                        .string()
+                        .describe(
+                            "At most 10 words saying what to look at or do here, not the element's title"
+                        ),
+                    part: z
+                        .string()
+                        .optional()
+                        .describe(
+                            'Multi-part answers only: the part this mark belongs to, or "shared" when it serves every part'
+                        ),
+                })
+            )
+            .max(7),
     }),
 });
 
@@ -436,11 +473,11 @@ export async function runChat(
         set_research_question: setResearchQuestionTool,
     };
     const messages = await convertToModelMessages(uiMessages);
-    const streamReply = (replySystem: string) =>
+    const streamReply = (replySystem: string, replyTools: ToolSet = tools) =>
         streamText({
             model: getModel(modelId),
             system: replySystem,
-            tools,
+            tools: replyTools,
             reasoning: REASONING_EFFORT,
             // The generic setting leaves Bedrock's `display` unset, where the
             // other providers ask for summarized thinking; without it the
@@ -481,10 +518,18 @@ export async function runChat(
             const replySystem = classification.value
                 ? `${system}\n\n${guidanceBlock(
                       GUIDANCE_SECTIONS,
-                      classification.value
+                      classification.value,
+                      guidance.context
                   )}`
                 : system;
-            writer.merge(streamReply(replySystem).toUIMessageStream());
+            // Marks need the turn's classification (it lists what can be
+            // marked); without one the reply goes ahead without them.
+            const replyTools = classification.value
+                ? { ...tools, set_highlights: setHighlightsTool }
+                : tools;
+            writer.merge(
+                streamReply(replySystem, replyTools).toUIMessageStream()
+            );
         },
         onError: err => describeError(err),
     });

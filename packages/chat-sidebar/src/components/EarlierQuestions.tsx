@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { getLatestPageEvents } from '@/lib/page-events';
 import { notifyNavigate, resolvePortalLink } from '@/lib/portal-link';
+import { markNavigationStarted } from '@/lib/navigationState';
 import {
     expectPageNavigation,
     getActiveResearch,
@@ -275,6 +276,7 @@ export const EarlierQuestions: FC = () => {
         const path = restorePath(entry.href);
         if (path) {
             expectPageNavigation();
+            markNavigationStarted(current);
             notifyNavigate(path);
         }
     };

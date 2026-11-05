@@ -30,6 +30,12 @@ export const CLIENT_EVENTS = [
     'page_action',
     // The sidebar moved the portal to follow the research question.
     'portal_navigation',
+    // The marks a reply placed (set_highlights), a reply whose text didn't
+    // match them, and the user following a mark from the chat or a part chip.
+    'badge_plan',
+    'badge_mismatch',
+    'badge_click',
+    'part_select',
 ] as const;
 
 export type ClientEvent = typeof CLIENT_EVENTS[number];

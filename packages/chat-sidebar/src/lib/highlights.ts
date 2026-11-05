@@ -9,11 +9,27 @@ import {
     getActiveResearch,
     subscribeToResearch,
 } from './researchQuestion';
+import {
+    contextTooltip,
+    CONTEXT_TARGET,
+    markKey,
+    PlanMark,
+    visibleForPart,
+} from './badgePlan';
+import {
+    getBadgeState,
+    getSelectedPart,
+    subscribeToBadges,
+} from './badgeState';
+import { guidanceEnabled } from './guidanceFlags';
 
-// Badges on the elements of the user's page most relevant to the chat's
-// research question. Requested from the server whenever the question or the
-// page's candidate elements change, then posted to the host, which draws them.
-// Independent of the chat's own turns.
+// Badges on the user's page. With the guided assistant, the latest reply's
+// own marks (its set_highlights plan, badgeState.ts) come first: numbered
+// like its text, with context and next-step markers. Where the reply placed
+// none on the page shown, the badges fall back to the elements most relevant
+// to the chat's research question, requested from the server whenever the
+// question or the page's candidate elements change. Posted to the host,
+// which draws them.
 
 export interface HighlightAnnotation {
     targetType: string;
@@ -33,6 +49,11 @@ interface HighlightCandidate {
 export interface HighlightsState {
     // idle: no question, or a page with nothing to highlight.
     status: 'idle' | 'loading' | 'ready' | 'error';
+    // Where the badges come from: the latest reply's marks, or the research
+    // question.
+    source: 'answer' | 'question';
+    // The reply's marks shown on this page (source 'answer').
+    answerCount: number;
     annotations: readonly HighlightAnnotation[];
     insight: string;
     // How many elements the page offered; 0 on pages without candidates.
@@ -46,6 +67,8 @@ interface Result {
 
 const IDLE: HighlightsState = {
     status: 'idle',
+    source: 'question',
+    answerCount: 0,
     annotations: [],
     insight: '',
     candidateCount: 0,
@@ -73,6 +96,7 @@ interface HighlightsPage {
     identity: string;
     pageType: string;
     candidates: HighlightCandidate[];
+    questionCandidates: HighlightCandidate[];
 }
 
 // The latest settled page.
@@ -124,6 +148,8 @@ function isCandidate(value: unknown): value is HighlightCandidate {
     );
 }
 
+const CONTEXT_KEY = markKey(CONTEXT_TARGET);
+
 function toPage(event: PageEvent): HighlightsPage {
     const raw = event.details.highlightCandidates;
     const pageType = event.details.available
@@ -140,6 +166,11 @@ function toPage(event: PageEvent): HighlightsPage {
         identity: `${pageType}${search}`,
         pageType,
         candidates: Array.isArray(raw) ? raw.filter(isCandidate) : [],
+        // The cohort summary carries only the reply's context marker.
+        questionCandidates: (Array.isArray(raw)
+            ? raw.filter(isCandidate)
+            : []
+        ).filter(c => markKey(c) !== CONTEXT_KEY),
     };
 }
 
@@ -148,7 +179,7 @@ function requestKey(question: string, p: HighlightsPage): string {
         question,
         getSelectedModel(),
         p.identity,
-        p.candidates.map(c => `${c.targetType}:${c.targetId}`),
+        p.questionCandidates.map(c => `${c.targetType}:${c.targetId}`),
     ]);
 }
 
@@ -168,16 +199,59 @@ function publish(next: HighlightsState): void {
 
 let lastPosted = '';
 
+/**
+ * The latest reply's marks on the page shown: whether it placed any here,
+ * and those the selected part chip shows.
+ */
+function answerMarksHere(): { any: boolean; visible: PlanMark[] } {
+    const { active } = getBadgeState();
+    if (!guidanceEnabled || !active || !page)
+        return { any: false, visible: [] };
+    const keys = new Set(page.candidates.map(markKey));
+    const here = active.plan.marks.filter(m => keys.has(markKey(m)));
+    const part = getSelectedPart(active.messageId);
+    return {
+        any: here.length > 0,
+        visible: here.filter(m => visibleForPart(m, part)),
+    };
+}
+
+function answerAnnotations(marks: PlanMark[], research: ActiveResearch) {
+    const { active } = getBadgeState();
+    return marks.map(m => ({
+        targetType: m.targetType,
+        targetId: m.targetId,
+        label: m.label,
+        // Results first in reading order, then the context and next step.
+        rank: m.number ?? (m.cue === 'context' ? 6 : 7),
+        reason:
+            m.cue === 'context' ? contextTooltip(research.slots) : m.tooltip,
+        cue: m.cue,
+        number: m.number,
+        part: m.part,
+        linked: active?.linked ?? false,
+    }));
+}
+
 // The host keeps only what was last posted, so this sends the full set.
 function postToHost(): void {
     if (!embedded) return;
     const research = getActiveResearch();
-    const annotations =
-        highlightQuery(research) &&
-        !research.dismissed &&
-        state.status === 'ready'
-            ? state.annotations
-            : [];
+    const marks = answerMarksHere();
+    const annotations = research.dismissed
+        ? []
+        : marks.any
+        ? answerAnnotations(marks.visible, research)
+        : getBadgeState().none
+        ? []
+        : highlightQuery(research) && state.status === 'ready'
+        ? state.annotations.map(a => ({
+              ...a,
+              cue: 'result',
+              number: a.rank,
+              linked: false,
+          }))
+        : [];
     const message = {
         type: 'chat-sidebar:highlights',
         annotations,
@@ -198,6 +272,19 @@ function update(): void {
     const research = getActiveResearch();
     const question = highlightQuery(research);
     const { dismissed } = research;
+    // The reply's own marks cover this page, or it wants none: no request.
+    const marks = answerMarksHere();
+    if (marks.any || (guidanceEnabled && getBadgeState().none)) {
+        abortInFlight();
+        publish({
+            ...IDLE,
+            status: marks.any ? 'ready' : 'idle',
+            source: 'answer',
+            answerCount: marks.visible.length,
+            candidateCount: page?.candidates.length ?? 0,
+        });
+        return;
+    }
     if (!question || dismissed || !page || page.candidates.length === 0) {
         abortInFlight();
         publish({ ...IDLE, candidateCount: page?.candidates.length ?? 0 });
@@ -211,7 +298,7 @@ function update(): void {
         publish(
             cached === 'error'
                 ? { ...IDLE, status: 'error', candidateCount }
-                : { status: 'ready', ...cached, candidateCount }
+                : { ...IDLE, status: 'ready', ...cached, candidateCount }
         );
         return;
     }
@@ -232,7 +319,7 @@ function request(key: string, question: string, p: HighlightsPage): void {
             question,
             href: p.href,
             pageType: p.pageType,
-            candidates: p.candidates,
+            candidates: p.questionCandidates,
             model: getSelectedModel(),
         }),
         signal: controller.signal,
@@ -283,4 +370,5 @@ export function retryHighlights(): void {
 }
 
 subscribeToResearch(update);
+subscribeToBadges(update);
 subscribeToSession(update);

@@ -39,6 +39,10 @@ export interface Classification {
     level: 'L1' | 'L2' | 'L3' | 'L4' | null;
     guidance_degree: string;
     multi_part: boolean;
+    // The separate answers a multi-part message asks for; empty otherwise.
+    parts?: string[];
+    // Each part's answerability, in the order of parts.
+    part_answerability?: ('ui' | 'custom' | 'unavailable')[];
     answerability: 'ui' | 'custom' | 'unavailable';
     move: Move | null;
     // Whether the study open on the page fits the question (its study and

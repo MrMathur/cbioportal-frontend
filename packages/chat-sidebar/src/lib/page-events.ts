@@ -1,4 +1,6 @@
 import { setCatalogPage } from './catalog';
+import { setHoveredFromPortal } from './badgeState';
+import { noteSettledPage } from './navigationState';
 import { guidanceEnabled } from './guidanceFlags';
 import { setLatestQuestionPage } from './researchQuestion';
 import { setPageSyncPage } from './pageSync';
@@ -102,11 +104,19 @@ export function listenForPageEvents(): void {
             setFollowupsSidebarOpen(mode === 'expanded');
             return;
         }
+        // A badge on the portal is hovered (key null: no longer).
+        if (e.data?.type === 'chat-sidebar:badgeHover') {
+            setHoveredFromPortal(
+                typeof e.data.key === 'string' ? e.data.key : null
+            );
+            return;
+        }
         if (e.data?.type !== 'chat-sidebar:pageEvent') return;
         const event = e.data.event as PageEvent;
         latest.snapshot = event;
         if (!event.pending) {
             latest.settledSnapshot = event;
+            noteSettledPage(event);
             setSettledSnapshot(event);
             if (guidanceEnabled) {
                 setLatestQuestionPage(event.href);

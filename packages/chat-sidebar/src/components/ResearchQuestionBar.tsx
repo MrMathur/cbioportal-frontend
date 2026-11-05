@@ -145,22 +145,34 @@ export const ResearchQuestionBar: FC = () => {
 
     // The guided box keeps the highlight status in the header, as a short
     // pill with the full status and insight on hover, to save height.
-    const pillText =
-        !guidanceEnabled || !hasQuestion
-            ? null
-            : research.dismissed
-            ? 'Hidden'
-            : highlights.status === 'loading'
-            ? 'Finding…'
-            : highlights.status === 'ready'
-            ? `${highlights.annotations.length} on page`
-            : null;
-    const pillTitle = [status, active ? highlights.insight : '']
+    const fromAnswer = highlights.source === 'answer';
+    const guidedHasHighlights =
+        guidanceEnabled && (hasQuestion || Boolean(research.aim) || fromAnswer);
+    const pillText = !guidedHasHighlights
+        ? null
+        : research.dismissed
+        ? 'Hidden'
+        : fromAnswer
+        ? highlights.answerCount
+            ? `${highlights.answerCount} from answer`
+            : null
+        : highlights.status === 'loading'
+        ? 'Finding…'
+        : highlights.status === 'ready'
+        ? `${highlights.annotations.length} on page`
+        : null;
+    const pillTitle = [
+        fromAnswer
+            ? 'Badges from the latest answer: hover a number in the chat to find its badge, click it to scroll there.'
+            : status,
+        !fromAnswer && active ? highlights.insight : '',
+        'Badges: numbered circle = part of the answer; grey ring = your cohort; amber arrow = next step.',
+    ]
         .filter(Boolean)
         .join('\n\n');
     const statusPill =
-        guidanceEnabled &&
-        hasQuestion &&
+        guidedHasHighlights &&
+        !fromAnswer &&
         !research.dismissed &&
         highlights.status === 'error' ? (
             <Button
@@ -224,7 +236,7 @@ export const ResearchQuestionBar: FC = () => {
                     </span>
                 )}
                 {statusPill && <div className="ml-auto">{statusPill}</div>}
-                {hasQuestion && !editing && threadId && (
+                {(hasQuestion || guidedHasHighlights) && !editing && threadId && (
                     <div
                         className={cn(
                             'flex items-center gap-0.5',

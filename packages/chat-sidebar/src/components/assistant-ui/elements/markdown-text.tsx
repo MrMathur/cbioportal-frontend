@@ -11,15 +11,28 @@ import {
 import remarkGfm from 'remark-gfm';
 import {
     ComponentPropsWithoutRef,
+    createContext,
     FC,
     memo,
     useCallback,
+    useContext,
     useEffect,
     useMemo,
     useRef,
     useState,
+    useSyncExternalStore,
 } from 'react';
-import { TextMessagePartProps } from '@assistant-ui/react';
+import { TextMessagePartProps, useAuiState } from '@assistant-ui/react';
+import {
+    BadgePlan,
+    stripTokens,
+    tokenFromHref,
+    tokensToLinks,
+} from '@/lib/badgePlan';
+import { getBadgeState, subscribeToBadges } from '@/lib/badgeState';
+import { classificationOfMessage } from '@/lib/messageParts';
+import { useMessageMarks } from '@/lib/useMessageMarks';
+import { MarkChip } from '@/components/MarkChip';
 import { CheckIcon, CopyIcon, DownloadIcon, TerminalIcon } from 'lucide-react';
 
 import { TooltipIconButton } from '@/components/assistant-ui/elements/tooltip-icon-button';
@@ -89,8 +102,70 @@ const useShallowStable = <T extends Record<string, unknown> | undefined>(
     return ref.current;
 };
 
+// The badge plan of the message being rendered, for its number chips.
+const MarksContext = createContext<BadgePlan | undefined>(undefined);
+
+/**
+ * Tags each block of a multi-part answer with its part and dims the other
+ * parts' blocks while a part chip is selected. A block belongs to the part
+ * heading it follows; before the first part heading, and after any other
+ * heading (e.g. "All parts"), blocks are shared. A block whose number chip
+ * belongs to a part, or to every part, follows its chip.
+ */
+function usePartSections(
+    container: React.RefObject<HTMLDivElement | null>,
+    parts: string,
+    selected: string
+) {
+    useEffect(() => {
+        const root = container.current?.querySelector('.aui-md');
+        if (!root || !parts) return;
+        const names = parts.split('\u0001');
+        const tag = () => {
+            let current = 'shared';
+            for (const block of Array.from(root.children)) {
+                if (/^H[1-4]$/.test(block.tagName)) {
+                    const text = (block.textContent ?? '').trim().toLowerCase();
+                    current =
+                        names.find(n => n.toLowerCase() === text) ?? 'shared';
+                }
+                const chipPart = block
+                    .querySelector('[data-mark-part]')
+                    ?.getAttribute('data-mark-part');
+                const part = chipPart ?? current;
+                block.setAttribute('data-section-part', part);
+                const dimmed =
+                    selected !== 'all' &&
+                    part !== 'shared' &&
+                    part !== selected;
+                block.toggleAttribute('data-part-dimmed', dimmed);
+            }
+        };
+        tag();
+        const observer = new MutationObserver(tag);
+        observer.observe(root, { childList: true });
+        return () => observer.disconnect();
+    }, [container, parts, selected]);
+}
+
 const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components }) => {
     const stableComponents = useShallowStable(components);
+    const { plan, mode } = useMessageMarks();
+    const preprocess = useCallback(
+        (text: string) =>
+            mode === 'chips' ? tokensToLinks(text, plan) : stripTokens(text),
+        [plan, mode]
+    );
+    const messageId = useAuiState(s => s.message.id);
+    const parts = useAuiState(
+        s => classificationOfMessage(s.message)?.parts?.join('\u0001') ?? ''
+    );
+    const selected = useSyncExternalStore(
+        subscribeToBadges,
+        () => getBadgeState().selectedParts[messageId] ?? 'all'
+    );
+    const container = useRef<HTMLDivElement>(null);
+    usePartSections(container, parts, selected);
     const markdownComponents = useMemo(() => {
         if (!stableComponents) return defaultComponents;
         return {
@@ -100,13 +175,24 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components }) => {
     }, [stableComponents]);
 
     return (
-        <MarkdownTextPrimitive
-            remarkPlugins={[remarkGfm]}
-            className="aui-md"
-            components={markdownComponents}
-            defer
-        />
+        <MarksContext.Provider value={mode === 'chips' ? plan : undefined}>
+            <div ref={container} className="contents">
+                <MarkdownTextPrimitive
+                    remarkPlugins={[remarkGfm]}
+                    className="aui-md"
+                    components={markdownComponents}
+                    preprocess={preprocess}
+                    defer
+                />
+            </div>
+        </MarksContext.Provider>
     );
+};
+
+// A sentence's number chip, from the #chat-mark-… link tokensToLinks makes.
+const MarkLink: FC<{ token: string }> = ({ token }) => {
+    const plan = useContext(MarksContext);
+    return <MarkChip token={token} plan={plan} />;
 };
 
 export const MarkdownText = memo(MarkdownTextImpl);
@@ -377,6 +463,8 @@ const memoizedComponents = memoizeMarkdownComponents({
         />
     ),
     a: ({ className, href, children, ...props }) => {
+        const token = tokenFromHref(href);
+        if (token) return <MarkLink token={token} />;
         const portalLink = resolvePortalLink(href);
         const path = portalLink?.path;
         if (path) {

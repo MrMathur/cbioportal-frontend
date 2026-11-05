@@ -71,13 +71,137 @@ $chat-highlight-ease: cubic-bezier(0.22, 1, 0.36, 1);
     line-height: 1.4;
 }
 
-.chat-highlight-tooltip-title {
-    margin-bottom: 4px;
-    font-size: 11px;
+$chat-highlight-context: #475569;
+$chat-highlight-next: #b45309;
+$chat-highlight-next-bg: #fef3c7;
+
+// Cue types, told apart by shape as well as colour: a filled numbered circle
+// (result), an outlined ring with a pin (context), a rounded square with an
+// arrow (next step).
+.chat-highlight-badge.chat-highlight-cue-context {
+    background: #fff;
+    color: $chat-highlight-context;
+    border: 2px solid $chat-highlight-context;
+    line-height: 14px;
+    box-shadow: none;
+}
+
+.chat-highlight-badge.chat-highlight-cue-next_step {
+    background: $chat-highlight-next-bg;
+    color: $chat-highlight-next;
+    border: 1px solid rgba($chat-highlight-next, 0.55);
+    border-radius: 5px;
+    line-height: 16px;
+}
+
+@keyframes chat-highlight-hover-pulse {
+    0%,
+    100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.25);
+    }
+}
+
+// The badge whose number chip is hovered in the chat.
+.chat-highlight-badge.chat-highlight-badge-hovered {
+    animation: chat-highlight-hover-pulse 0.7s ease-in-out infinite;
+    box-shadow: 0 0 0 4px rgba($chat-highlight-accent, 0.3);
+}
+
+.chat-highlight-tooltip-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    margin-right: 6px;
+    border-radius: 8px;
+    font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    opacity: 0.75;
+    vertical-align: 1px;
+    background: $chat-highlight-accent;
+    color: #fff;
+
+    &.chat-highlight-cue-context {
+        background: #fff;
+        color: $chat-highlight-context;
+        border: 1.5px solid $chat-highlight-context;
+    }
+
+    &.chat-highlight-cue-next_step {
+        background: $chat-highlight-next-bg;
+        color: $chat-highlight-next;
+        border-radius: 4px;
+    }
+}
+
+// The element of a badge hovered in the chat, and the one just scrolled to.
+[data-chat-highlight-target][data-chat-hovered] {
+    outline: 2px solid rgba($chat-highlight-accent, 0.9);
+    outline-offset: 3px;
+    box-shadow: 0 0 0 6px rgba($chat-highlight-accent, 0.12);
+    transition: outline-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+@keyframes chat-highlight-emphasis {
+    0% {
+        box-shadow: 0 0 0 0 rgba($chat-highlight-accent, 0.55);
+    }
+    100% {
+        box-shadow: 0 0 0 14px rgba($chat-highlight-accent, 0);
+    }
+}
+
+[data-chat-highlight-target][data-chat-emphasis] {
+    outline: 2px solid $chat-highlight-accent;
+    outline-offset: 3px;
+    animation: chat-highlight-emphasis 0.8s ease-out 2;
+}
+
+// Off-screen badges: small buttons at the page's top or bottom edge, left of
+// the chat sidebar, that scroll to them.
+.chat-highlight-edge {
+    position: fixed;
+    right: calc(var(--chat-sidebar-reserved-width, 0px) + 16px);
+    z-index: 9999;
+    display: flex;
+    gap: 6px;
+
+    &.chat-highlight-edge-above {
+        top: 12px;
+    }
+
+    &.chat-highlight-edge-below {
+        bottom: 16px;
+    }
+}
+
+.chat-highlight-edge-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px 2px 6px;
+    border: 1px solid rgba($chat-highlight-accent, 0.4);
+    border-radius: 999px;
+    background: #fff;
+    color: $chat-highlight-accent-deep;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+        background: rgba($chat-highlight-accent, 0.08);
+    }
+
+    .chat-highlight-badge {
+        margin: 0;
+        animation: none;
+    }
 }
 
 // Controls (buttons, search and query boxes): the badge sits on the
@@ -95,6 +219,14 @@ $chat-highlight-ease: cubic-bezier(0.22, 1, 0.36, 1);
         border-radius: 4px;
         outline: 2px solid rgba($chat-highlight-accent, 0.85);
         outline-offset: 2px;
+    }
+
+    &[data-chat-cue='context'] {
+        outline: 2px dashed rgba($chat-highlight-context, 0.7);
+    }
+
+    &[data-chat-cue='next_step'] {
+        outline-color: rgba($chat-highlight-next, 0.8);
     }
 }
 

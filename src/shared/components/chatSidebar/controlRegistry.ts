@@ -9,13 +9,15 @@ export type ControlId =
     | 'study-view-compare'
     | 'study-search'
     | 'gene-query'
-    | 'download';
+    | 'download'
+    | 'cohort-summary';
 
 export const CONTROL_LABELS: Record<ControlId, string> = {
     'study-view-compare': 'Groups button (create groups and Compare them)',
     'study-search': 'Study search box',
     'gene-query': 'Gene / OQL query box',
     download: 'Download button',
+    'cohort-summary': 'Selected patients and samples',
 };
 
 export const CONTROL_DESCRIPTIONS: Record<ControlId, string> = {
@@ -24,6 +26,8 @@ export const CONTROL_DESCRIPTIONS: Record<ControlId, string> = {
     'study-search': 'Home page box for finding studies by name or keyword',
     'gene-query': 'Box for entering genes or OQL to query',
     download: 'Downloads the data of the current page or study',
+    'cohort-summary':
+        'Study View: the size of the cohort selected with the current filters',
 };
 
 // Counted, since a control can be mounted more than once (e.g. two query
