@@ -13,7 +13,9 @@ export type GuidanceEvent =
     | 'restore'
     | 'topic_change'
     | 'option_pick'
-    | 'send_question';
+    | 'send_question'
+    | 'page_action'
+    | 'portal_navigation';
 
 export function logGuidanceEvent(
     event: GuidanceEvent,

@@ -25,6 +25,11 @@ export const CLIENT_EVENTS = [
     'topic_change',
     'option_pick',
     'send_question',
+    // A Study View filter change the user made, recorded as a step of the
+    // current topic (refine, broaden or sibling).
+    'page_action',
+    // The sidebar moved the portal to follow the research question.
+    'portal_navigation',
 ] as const;
 
 export type ClientEvent = typeof CLIENT_EVENTS[number];

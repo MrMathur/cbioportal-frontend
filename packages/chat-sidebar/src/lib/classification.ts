@@ -41,6 +41,9 @@ export interface Classification {
     multi_part: boolean;
     answerability: 'ui' | 'custom' | 'unavailable';
     move: Move | null;
+    // Whether the study open on the page fits the question (its study and
+    // filters count as fixed).
+    open_study_applies?: boolean;
     drafts: {
         broad_aim: string;
         working_question: string;

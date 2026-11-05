@@ -155,3 +155,37 @@ export function slotsFromPage(
     if (genes.size) slots.entity = listNames([...genes]);
     return slots;
 }
+
+/**
+ * The Study View filters in an href as comparable keys, one per filtered
+ * value (clinical attribute and value, gene, custom selection), or null when
+ * the href isn't a Study View page. Keys use ids, not display names, so a
+ * change in how a filter is named isn't taken for a change of filter.
+ */
+export function filterKeysFromHref(href: string): string[] | null {
+    if (pageKind(href) !== 'study') return null;
+    const filters = filtersFromHref(href);
+    if (!filters) return [];
+    const keys: string[] = [];
+    for (const f of filters.clinicalDataFilters ?? []) {
+        if (!f.attributeId) continue;
+        for (const v of f.values ?? []) {
+            const value =
+                typeof v.value === 'string'
+                    ? v.value
+                    : `${v.start ?? ''}-${v.end ?? ''}`;
+            keys.push(`clinical:${f.attributeId}=${value}`);
+        }
+    }
+    for (const g of filters.geneFilters ?? []) {
+        for (const group of g.geneQueries ?? []) {
+            for (const query of group) {
+                if (query.hugoGeneSymbol)
+                    keys.push(`gene:${query.hugoGeneSymbol}`);
+            }
+        }
+    }
+    if ((filters.sampleIdentifiers ?? []).length > 0)
+        keys.push('samples:custom');
+    return [...new Set(keys)].sort();
+}

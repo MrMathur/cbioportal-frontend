@@ -110,6 +110,7 @@ function raw(overrides: Partial<RawClassification> = {}): RawClassification {
         },
         needs_groups: false,
         study_is_collection: false,
+        uses_open_page: false,
         multi_part: false,
         answerability: 'ui',
         move: null,
@@ -315,13 +316,14 @@ test('a user-fixed slot holds unless the message names another value', () => {
     assert.equal(replaced.slots.entity.source, 'chat');
 });
 
-test('a new topic drops what the user fixed but keeps the page', () => {
+test('a new topic drops what the user fixed and what the page shows', () => {
     const previous = resolveClassification(raw(), ctx(), 'earlier');
     const c = resolveClassification(
         raw({ move: 'new' }),
         ctx({
             previous,
             userAim: 'Old aim',
+            catalog: catalog({ selectedStudies: [STUDIES[2]] }),
             fixedSlots: {
                 entity: { status: 'specified', value: 'EGFR', source: 'user' },
                 filter: {
@@ -335,7 +337,8 @@ test('a new topic drops what the user fixed but keeps the page', () => {
     );
     assert.equal(c.move, 'new');
     assert.equal(c.slots.entity.status, 'missing');
-    assert.equal(c.slots.filter.value, 'Sex: Female');
+    assert.equal(c.slots.filter.status, 'missing');
+    assert.equal(c.open_study_applies, false);
     assert.equal(c.drafts.broad_aim, 'aim');
 });
 
@@ -492,4 +495,197 @@ test('parseClientEvent accepts known events only', () => {
     });
     assert.equal(ok?.event, 'restore');
     assert.equal(ok?.thread_id, 't');
+});
+
+test('a question about another cohort ignores the open study and its filters', () => {
+    const gbm = {
+        id: 'gbm',
+        name: 'Glioblastoma',
+        parent: 'difg',
+        ownStudies: 12,
+        subtreeStudies: 12,
+        children: [],
+    };
+    const mskChord = {
+        studyId: 'msk_chord_2024',
+        name: 'MSK-CHORD (MSK, Nature 2024)',
+        cancerTypeId: 'mixed',
+        sampleCount: 25040,
+    };
+    const gbmTcga = {
+        studyId: 'gbm_tcga_pan_can_atlas_2018',
+        name: 'Glioblastoma Multiforme (TCGA, PanCancer Atlas)',
+        cancerTypeId: 'gbm',
+        sampleCount: 592,
+    };
+    const c = resolveClassification(
+        raw({
+            move: 'new',
+            slots: {
+                ...raw().slots,
+                cohort: slot('specified', 'Glioblastoma', ['gbm']),
+                entity: slot('specified', 'CDKN2A, CDK4, RB1'),
+                measure: slot('specified', 'alteration frequency'),
+            },
+        }),
+        ctx({
+            previous: resolveClassification(raw(), ctx(), 'earlier'),
+            catalog: catalog({
+                cancerTypes: [gbm],
+                studies: [gbmTcga, mskChord],
+                selectedStudies: [mskChord],
+                selectedStudyCancerTypes: [
+                    { name: 'Colorectal Cancer', count: 5000 },
+                    { name: 'Non-Small Cell Lung Cancer', count: 7000 },
+                ],
+            }),
+            fixedSlots: {
+                study: {
+                    status: 'specified',
+                    value: 'MSK-CHORD (MSK, Nature 2024)',
+                    source: 'page',
+                },
+                filter: {
+                    status: 'specified',
+                    value: 'Mutation Count: 200–250',
+                    source: 'page',
+                },
+            },
+        }),
+        'What percentage of glioblastoma patients have alterations in RB pathway genes (CDKN2A, CDK4, RB1)?'
+    );
+    assert.equal(c.open_study_applies, false);
+    assert.equal(c.slots.study.status, 'missing');
+    assert.match(c.slots.study.options[0], /Glioblastoma Multiforme/);
+    assert.equal(c.slots.filter.status, 'missing');
+    assert.equal(c.level, 'L3');
+});
+
+test('the open study applies when it covers the cohort named', () => {
+    const c = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot('specified', 'breast cancer', ['brca']),
+                entity: slot('specified', 'TP53'),
+                measure: slot('specified', 'mutation frequency'),
+            },
+        }),
+        ctx({
+            catalog: catalog({ selectedStudies: [STUDIES[2]] }),
+            fixedSlots: {
+                filter: {
+                    status: 'specified',
+                    value: 'Sex: Female',
+                    source: 'page',
+                },
+            },
+        }),
+        'TP53 mutation frequency in breast cancer'
+    );
+    assert.equal(c.open_study_applies, true);
+    assert.equal(c.slots.study.source, 'page');
+    assert.equal(c.slots.filter.value, 'Sex: Female');
+    assert.equal(c.level, 'L4');
+});
+
+test('an ambiguous slot without a single value beats the page value', () => {
+    const c = resolveClassification(
+        raw({
+            goal: 'explore',
+            slots: {
+                ...raw().slots,
+                entity: slot(
+                    'ambiguous',
+                    null,
+                    [],
+                    ['IDH1 R132H', 'any IDH1 mutation']
+                ),
+            },
+        }),
+        ctx({
+            fixedSlots: {
+                entity: { status: 'specified', value: 'KRAS', source: 'user' },
+            },
+        }),
+        'm'
+    );
+    assert.equal(c.slots.entity.status, 'ambiguous');
+});
+
+test('a new question ignores the open page even when it covers the cohort', () => {
+    const previous = resolveClassification(raw(), ctx(), 'earlier');
+    const slots = {
+        ...raw().slots,
+        cohort: slot('specified', 'breast cancer', ['brca']),
+        entity: slot('specified', 'TP53'),
+        measure: slot('specified', 'mutation frequency'),
+    };
+    const pageCtx = ctx({
+        previous,
+        catalog: catalog({ selectedStudies: [STUDIES[2]] }),
+        fixedSlots: {
+            filter: {
+                status: 'specified',
+                value: 'Mutation Count: 200–250',
+                source: 'page',
+            },
+        },
+    });
+    const fresh = resolveClassification(
+        raw({ move: 'new', slots }),
+        pageCtx,
+        'm'
+    );
+    assert.equal(fresh.open_study_applies, false);
+    assert.equal(fresh.slots.filter.status, 'missing');
+    assert.equal(fresh.slots.study.status, 'missing');
+    assert.equal(fresh.level, 'L3');
+
+    const refers = resolveClassification(
+        raw({ move: 'new', uses_open_page: true, slots }),
+        pageCtx,
+        'TP53 in this study'
+    );
+    assert.equal(refers.open_study_applies, true);
+    assert.equal(refers.slots.filter.value, 'Mutation Count: 200–250');
+
+    const refine = resolveClassification(
+        raw({ move: 'refine', slots }),
+        pageCtx,
+        'm'
+    );
+    assert.equal(refine.open_study_applies, true);
+});
+
+test('log CSV puts a page step in the move column', () => {
+    const line = JSON.stringify({
+        at: '2026-11-05T10:00:00Z',
+        codebook_version: 5,
+        event: 'page_action',
+        session_id: 's',
+        participant: '',
+        thread_id: 't',
+        payload: {
+            move: 'refine',
+            question: 'Narrowed on the page: Sex: Female',
+        },
+    });
+    const [header, row] = logToCsv(line)
+        .trim()
+        .split('\n');
+    const moveIndex = header.split(',').indexOf('move');
+    assert.equal(row.split(',')[moveIndex], 'refine');
+});
+
+test('an exploring question keeps only the broad aim', () => {
+    const c = resolveClassification(
+        raw({ goal: 'explore' }),
+        ctx(),
+        'Tell me about IDH1 in LGG'
+    );
+    assert.equal(c.level, 'L1');
+    assert.equal(c.drafts.broad_aim, 'aim');
+    assert.equal(c.drafts.working_question, '');
+    assert.equal(c.drafts.concrete_analysis, '');
 });

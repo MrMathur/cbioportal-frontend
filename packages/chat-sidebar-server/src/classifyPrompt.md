@@ -9,7 +9,7 @@ Judge only what the user actually wrote, plus what is fixed outside the message 
 You are given:
 
 - Earlier user messages in this chat and the previous classification, for follow-ups.
-- Slots fixed outside this message: by the user in the research question box, or by the portal page (open study, Study View filters, gene query). These count as **specified** unless this message explicitly replaces them with a different value.
+- Slots fixed outside this message: by the user in the research question box, or by the portal page (open study, Study View filters, gene query). These count as **specified** unless this message explicitly replaces them with a different value. Values fixed by the page apply only when the question is about the open study (see Study and the catalog).
 - **Portal catalog candidates**: cancer types and studies from the portal that plausibly match the message, and the clinical attributes and molecular profiles of the studies open on the page. Use these to decide cohort and study; never rely on memory for what the portal holds.
 
 ## Step 1: request_type
@@ -54,7 +54,7 @@ Measure terms: mutation frequency, alteration frequency, copy number, mRNA expre
 **Study and the catalog.**
 - Put the ids of the studies the user means in `study.matched_ids`, copied exactly from the study candidates. One dataset named → specified. Several match (e.g. "TCGA breast" matches the PanCancer Atlas and the Firehose Legacy versions) → ambiguous, with those studies as `options`.
 - Set `study_is_collection` true only when the user explicitly asks for a collection ("all TCGA PanCancer studies").
-- A study open on the page counts as specified unless the message names another one.
+- A study open on the page counts as specified only when the question is about it. A **new** question (move `new`) starts clean: what is open in the portal doesn't apply unless the message explicitly refers to it ("this study", "these patients", "my current selection"). For the first question in a chat and for follow-ups, the open study applies when the message names no cohort, or names a cancer type the open study covers. When the message names another study, or a cohort the open study doesn't cover (e.g. glioblastoma while a colorectal cohort is open), the open study, its filters and its gene query don't apply: judge the study slot from the message alone (usually missing).
 
 **Groups.** Set `needs_groups` true when the results are needed per group, for any goal: a comparison, a breakdown ("by subtype"), "X vs Y". A ranking or a single number for one cohort doesn't need groups. A correlation between two variables doesn't need groups.
 
@@ -62,6 +62,7 @@ Slots fixed in earlier turns stay specified when this message is a follow-up of 
 
 ## Flags
 
+- `uses_open_page`: true when the message explicitly refers to what is open in the portal: "this study", "these patients", "the selected samples", "my current filters", "what's on screen". False otherwise, including when the message merely could be answered on the open page.
 - `multi_part`: true when the message asks for two or more separate answers. Test: could one view, table or plot answer all of it?
 - `answerability`: `ui` when a portal view (Study View, Results View, Group Comparison, Plots, Patient View) can answer it; `custom` when it needs a custom query or analysis outside the portal's views; `unavailable` when the portal has no such data.
 - `move` (only when there is a previous classification; null otherwise), comparing with the previous question:
@@ -73,7 +74,7 @@ Slots fixed in earlier turns stay specified when this message is a follow-up of 
 
 ## Drafts
 
-Always draft the three levels of the research question, in the user's language, so the user can start at any level and edit the others:
+Draft the levels of the research question, in the user's language, so the user can start at any level and edit the others. For an `explore` goal, draft only `broad_aim` and leave `working_question` and `concrete_analysis` empty: the user hasn't asked a specific question yet.
 
 - `broad_aim` (L1): a short aim, e.g. "Understand KRAS in lung cancer".
 - `working_question` (L3): one researchable question, e.g. "Is KRAS mutation linked to worse overall survival in female lung adenocarcinoma patients?". Use only what the user gave and what is fixed; where a slot is missing or ambiguous keep the question general rather than inventing a value.

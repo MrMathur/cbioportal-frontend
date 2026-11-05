@@ -659,8 +659,14 @@ const AssistantMessage: FC = () => {
                                     )
                                 );
                             case 'data':
-                                return part.name === 'classification' ? (
-                                    <ClassificationBadge data={part.data} />
+                                return part.name === 'classification' ||
+                                    part.name === 'classification-error' ? (
+                                    <ClassificationBadge
+                                        data={part.data}
+                                        failed={
+                                            part.name === 'classification-error'
+                                        }
+                                    />
                                 ) : (
                                     part.dataRendererUI
                                 );

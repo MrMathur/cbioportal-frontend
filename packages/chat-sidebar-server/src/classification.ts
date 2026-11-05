@@ -83,6 +83,11 @@ export const RawClassificationSchema = z.object({
         .describe(
             'True when the user explicitly asks for a collection of studies (e.g. "all TCGA PanCancer studies")'
         ),
+    uses_open_page: z
+        .boolean()
+        .describe(
+            'True when the message explicitly refers to what is open in the portal ("this study", "these patients", "my selection", "the current filters")'
+        ),
     multi_part: z.boolean(),
     answerability: z.enum(['ui', 'custom', 'unavailable']),
     move: z.enum(MOVES).nullable(),
@@ -120,6 +125,10 @@ export interface Classification {
     multi_part: boolean;
     answerability: Answerability;
     move: Move | null;
+    // Whether the study open on the page fits the question, so its study and
+    // filters count as fixed; false when none is open or it is about another
+    // cohort.
+    open_study_applies: boolean;
     drafts: RawClassification['drafts'];
     rationale: string;
     // Notes from the catalog check, e.g. why a cohort became ambiguous.
@@ -180,6 +189,57 @@ function emptySlot(): Slot {
 
 function hasSelectedStudy(context: GuidanceContext): boolean {
     return (context.catalog?.selectedStudies.length ?? 0) > 0;
+}
+
+/**
+ * Whether what is open in the portal (study, filters, gene query) is part of
+ * the question. A new question starts clean: the page counts only if the
+ * message refers to it ("this study"). Otherwise, for the first question
+ * and follow-ups, it counts when the open study is about the question's
+ * cohort: the message names no cohort, or the open study's cancer type (or
+ * one of the cancer types in it) matches the cohort named. A question about
+ * another cohort ("glioblastoma" while a colorectal cohort is open) gets
+ * nothing from the page.
+ */
+export function openStudyFits(
+    raw: RawClassification,
+    context: GuidanceContext
+): boolean {
+    const catalog = context.catalog;
+    if (!catalog || catalog.selectedStudies.length === 0) return false;
+    if (raw.uses_open_page) return true;
+    if (isNewTopic(raw, context)) return false;
+    const cohort = raw.slots.cohort;
+    if (cohort.status === 'missing') return true;
+    const ids = new Set(cohortTypeIds(cohort.matched_ids, catalog));
+    if (catalog.selectedStudies.some(s => ids.has(s.cancerTypeId))) {
+        return true;
+    }
+    const value = (cohort.value ?? '').trim().toLowerCase();
+    if (!value) return false;
+    return catalog.selectedStudyCancerTypes.some(t => {
+        const name = t.name.toLowerCase();
+        return name.includes(value) || value.includes(name);
+    });
+}
+
+// The context with the page's part removed: no open study, no slots the
+// page fixed.
+function withoutPage(context: GuidanceContext): GuidanceContext {
+    const fixedSlots: GuidanceContext['fixedSlots'] = {};
+    for (const name of SLOT_NAMES) {
+        const fixed = context.fixedSlots[name];
+        if (fixed && fixed.source !== 'page') fixedSlots[name] = fixed;
+    }
+    return {
+        ...context,
+        fixedSlots,
+        catalog: context.catalog && {
+            ...context.catalog,
+            selectedStudies: [],
+            selectedStudyCancerTypes: [],
+        },
+    };
 }
 
 // Drops ids that sit below another matched id: "lung" and "luad" together
@@ -423,11 +483,9 @@ function applyFixed(
     if (!fixed || !fixed.value) return slot;
     if (fixed.source === 'user' && isNewTopic(raw, context)) return slot;
     const rawSlot = raw.slots[name];
-    if (
-        rawSlot.status !== 'missing' &&
-        rawSlot.value &&
-        rawSlot.value !== fixed.value
-    ) {
+    // An ambiguous slot often has no single value, only options; it still
+    // replaces the fixed one.
+    if (rawSlot.status !== 'missing' && rawSlot.value !== fixed.value) {
         return slot;
     }
     return {
@@ -444,10 +502,19 @@ function isNewTopic(raw: RawClassification, context: GuidanceContext): boolean {
 
 export function resolveClassification(
     raw: RawClassification,
-    context: GuidanceContext,
+    fullContext: GuidanceContext,
     message: string
 ): Classification {
     const checks: string[] = [];
+    const openStudyApplies = openStudyFits(raw, fullContext);
+    if (!openStudyApplies && hasSelectedStudy(fullContext)) {
+        checks.push(
+            isNewTopic(raw, fullContext)
+                ? 'page: new question that does not refer to the open page, so its study and filters do not apply'
+                : 'page: the open study is about another cohort, so its study and filters do not apply'
+        );
+    }
+    const context = openStudyApplies ? fullContext : withoutPage(fullContext);
     const isData = raw.request_type === 'data';
     // Catalog questions name cohorts and studies too ("which lung studies
     // have CNA data?"), which the research question box shows.
@@ -486,6 +553,7 @@ export function resolveClassification(
     }
 
     const goal = isData ? raw.goal : null;
+    const exploring = goal === 'explore';
     const newTopic = isNewTopic(raw, context);
     const needsGroups =
         isData &&
@@ -510,12 +578,15 @@ export function resolveClassification(
         multi_part: raw.multi_part,
         answerability: raw.answerability,
         move: context.previous ? raw.move : null,
+        open_study_applies: openStudyApplies,
         drafts: {
             broad_aim: (!newTopic && context.userAim) || raw.drafts.broad_aim,
+            // An exploring question has no specific question yet: only the
+            // aim, unless the user wrote a question themselves.
             working_question:
                 (!newTopic && context.userQuestion) ||
-                raw.drafts.working_question,
-            concrete_analysis: raw.drafts.concrete_analysis,
+                (exploring ? '' : raw.drafts.working_question),
+            concrete_analysis: exploring ? '' : raw.drafts.concrete_analysis,
         },
         rationale: raw.rationale,
         checks,
@@ -683,11 +754,27 @@ export function parseGuidanceContext(
             userAim: str(v.userAim, 300) || undefined,
             userQuestion: str(v.userQuestion, 500) || undefined,
             history,
+            previous: isPreviousClassification(v.previous)
+                ? v.previous
+                : undefined,
         },
         sessionId: str(v.sessionId, 100),
         participant: str(v.participant, 100),
         threadId: str(v.threadId, 100),
     };
+}
+
+// A classification the sidebar sends back for a retry, as the previous turn.
+function isPreviousClassification(value: unknown): value is Classification {
+    const c = value as Partial<Classification> | null;
+    return (
+        !!c &&
+        c.codebook_version === CODEBOOK_VERSION &&
+        typeof c.request_type === 'string' &&
+        !!c.slots &&
+        SLOT_NAMES.every(n => typeof c.slots?.[n]?.status === 'string') &&
+        !!c.drafts
+    );
 }
 
 function isCatalogMatches(value: unknown): value is CatalogMatches {

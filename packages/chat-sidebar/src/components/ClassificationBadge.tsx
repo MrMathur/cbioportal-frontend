@@ -26,9 +26,21 @@ function summary(c: Classification): string {
     return parts.join(' · ');
 }
 
-export const ClassificationBadge: FC<{ data: unknown }> = ({ data }) => {
+export const ClassificationBadge: FC<{ data: unknown; failed?: boolean }> = ({
+    data,
+    failed,
+}) => {
     const [open, setOpen] = useState(false);
-    if (!guidanceDebug || !isClassification(data)) return null;
+    if (!guidanceDebug) return null;
+    if (failed) {
+        return (
+            <div className="my-1 inline-flex items-center gap-1 rounded-md border border-dashed border-red-500/60 bg-red-50 px-1.5 py-0.5 font-mono text-[11px] text-red-900 dark:bg-red-950/40 dark:text-red-200">
+                <BugIcon className="size-3 shrink-0" aria-hidden />
+                classification failed: reply unguided
+            </div>
+        );
+    }
+    if (!isClassification(data)) return null;
     return (
         <div className="my-1 text-[11px]">
             <button
@@ -44,6 +56,11 @@ export const ClassificationBadge: FC<{ data: unknown }> = ({ data }) => {
             {open && (
                 <div className="mt-1 rounded-md border border-border bg-muted/40 p-2 font-mono leading-snug">
                     <div>degree: {data.guidance_degree}</div>
+                    {data.open_study_applies === false && (
+                        <div>
+                            open page: not used (other cohort or none open)
+                        </div>
+                    )}
                     {SLOT_NAMES.map(n => (
                         <div
                             key={n}

@@ -62,6 +62,7 @@ function forReply(c: Classification): object {
         multi_part: c.multi_part,
         answerability: c.answerability,
         move: c.move,
+        open_study_applies: c.open_study_applies,
     };
 }
 

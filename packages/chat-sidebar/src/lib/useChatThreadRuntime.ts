@@ -15,6 +15,8 @@ import { notifyNavigate, resolvePortalLink } from './portal-link';
 import { detailsForModel, getLatestPageEvents } from './page-events';
 import {
     applyClassification,
+    expectPageNavigation,
+    setClassificationFailed,
     setLatestFinding,
     setResearchQuestionFromChat,
 } from './researchQuestion';
@@ -22,6 +24,7 @@ import { isClassification } from './classification';
 import { guidanceEnabled } from './guidanceFlags';
 import { buildGuidancePayload } from './guidanceRequest';
 import { findingFromReply } from './topics';
+import { syncPortalToClassification } from './portalSync';
 
 export class ChatAuthError extends Error {
     constructor(readonly status: AuthErrorStatus) {
@@ -102,7 +105,10 @@ export function useChatThreadRuntime(): AssistantRuntime {
                 const { url } = toolCall.input as { url: string };
                 const path = resolvePortalLink(url)?.path;
                 const navigated = Boolean(path);
-                if (path) notifyNavigate(path);
+                if (path) {
+                    expectPageNavigation();
+                    notifyNavigate(path);
+                }
                 addToolOutput({
                     tool: 'go_to_page',
                     toolCallId: toolCall.toolCallId,
@@ -148,6 +154,23 @@ export function useChatThreadRuntime(): AssistantRuntime {
         onData: dataPart => {
             if (
                 guidanceEnabled &&
+                dataPart.type === 'data-classification-error'
+            ) {
+                const { message } = (dataPart.data ?? {}) as {
+                    message?: unknown;
+                };
+                if (typeof message === 'string') {
+                    const ids = threadIdsRef.current;
+                    setClassificationFailed(
+                        ids.remoteId,
+                        ids.threadId,
+                        message
+                    );
+                }
+                return;
+            }
+            if (
+                guidanceEnabled &&
                 dataPart.type === 'data-classification' &&
                 isClassification(dataPart.data)
             ) {
@@ -158,6 +181,7 @@ export function useChatThreadRuntime(): AssistantRuntime {
                     dataPart.data,
                     getLatestPageEvents().settledSnapshot?.href
                 );
+                syncPortalToClassification(dataPart.data, ids.threadId);
             }
         },
         onFinish: ({ message, isAbort, isError }) => {

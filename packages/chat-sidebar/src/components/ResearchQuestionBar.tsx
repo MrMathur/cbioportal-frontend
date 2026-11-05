@@ -143,11 +143,62 @@ export const ResearchQuestionBar: FC = () => {
         highlights.annotations.length > 0;
     const status = hasQuestion ? statusText(research, highlights) : null;
 
+    // The guided box keeps the highlight status in the header, as a short
+    // pill with the full status and insight on hover, to save height.
+    const pillText =
+        !guidanceEnabled || !hasQuestion
+            ? null
+            : research.dismissed
+            ? 'Hidden'
+            : highlights.status === 'loading'
+            ? 'Finding…'
+            : highlights.status === 'ready'
+            ? `${highlights.annotations.length} on page`
+            : null;
+    const pillTitle = [status, active ? highlights.insight : '']
+        .filter(Boolean)
+        .join('\n\n');
+    const statusPill =
+        guidanceEnabled &&
+        hasQuestion &&
+        !research.dismissed &&
+        highlights.status === 'error' ? (
+            <Button
+                variant="link"
+                size="xs"
+                className="h-auto px-0 text-[10px]"
+                title={pillTitle}
+                onClick={retryHighlights}
+            >
+                <RotateCwIcon />
+                Retry highlights
+            </Button>
+        ) : pillText ? (
+            <span
+                role="status"
+                title={pillTitle}
+                aria-label={pillTitle || pillText}
+                className="inline-flex shrink-0 cursor-help items-center gap-1 rounded-full bg-muted px-1.5 text-[10px] leading-4 text-muted-foreground"
+            >
+                {highlights.status === 'loading' && !research.dismissed && (
+                    <LoaderIcon className="size-2.5 animate-spin" />
+                )}
+                {active && (
+                    <span
+                        aria-hidden="true"
+                        className="size-1.5 rounded-full bg-[#3786c2]"
+                    />
+                )}
+                {pillText}
+            </span>
+        ) : null;
+
     return (
         <section
             aria-label="Research question"
             className={cn(
-                'border-b border-border bg-gradient-to-b to-transparent px-4 pt-2.5 pb-2 transition-[background-color,box-shadow] duration-700',
+                'border-b border-border bg-gradient-to-b to-transparent px-4 transition-[background-color,box-shadow] duration-700',
+                guidanceEnabled ? 'pt-1.5 pb-1.5' : 'pt-2.5 pb-2',
                 chatFlash
                     ? 'bg-[#3786c2]/10 from-[#3786c2]/15 shadow-[inset_3px_0_0_#3786c2]'
                     : 'from-sky-50/80 dark:from-sky-950/30'
@@ -172,8 +223,14 @@ export const ResearchQuestionBar: FC = () => {
                         Updated from chat
                     </span>
                 )}
+                {statusPill && <div className="ml-auto">{statusPill}</div>}
                 {hasQuestion && !editing && threadId && (
-                    <div className="ml-auto flex items-center gap-0.5">
+                    <div
+                        className={cn(
+                            'flex items-center gap-0.5',
+                            !statusPill && 'ml-auto'
+                        )}
+                    >
                         <TooltipIconButton
                             tooltip={
                                 research.focus
@@ -277,7 +334,7 @@ export const ResearchQuestionBar: FC = () => {
                 </button>
             )}
 
-            {!editing && status && (
+            {!guidanceEnabled && !editing && status && (
                 <div
                     role="status"
                     className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground"
@@ -306,7 +363,7 @@ export const ResearchQuestionBar: FC = () => {
                 </div>
             )}
 
-            {!editing && active && highlights.insight && (
+            {!guidanceEnabled && !editing && active && highlights.insight && (
                 <p className="mt-1 text-xs leading-snug text-foreground/80">
                     {highlights.insight}
                 </p>

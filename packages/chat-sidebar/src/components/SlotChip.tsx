@@ -22,6 +22,17 @@ export const SLOT_PROMPTS: Record<SlotName, string> = {
     filter: 'Should the patients be restricted (e.g. sex: female)?',
 };
 
+// Chip labels, short so the six chips fit on fewer lines; the full name is in
+// the chip's tooltip and its popover.
+const SHORT_LABELS: Record<SlotName, string> = {
+    cohort: 'Cohort',
+    study: 'Study',
+    entity: 'Gene',
+    measure: 'Measure',
+    groups: 'Groups to compare',
+    filter: 'Filter',
+};
+
 const SOURCE_LABELS: Record<Slot['source'], string> = {
     chat: 'from your message',
     user: 'set by you',
@@ -83,11 +94,11 @@ export const SlotChip: FC<Props> = ({
                 render={
                     <button
                         type="button"
-                        title={`${label}${
+                        title={`${label}${hasValue ? `: ${slot.value}` : ''}${
                             hasValue ? ` (${SOURCE_LABELS[slot.source]})` : ''
                         }`}
                         className={cn(
-                            'inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-2 py-0.5 text-left text-[11px] leading-4 transition-colors',
+                            'inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-left text-[11px] leading-4 transition-colors',
                             slot.status === 'specified' &&
                                 'border-[#3786c2]/30 bg-[#3786c2]/10 text-foreground hover:bg-[#3786c2]/15',
                             slot.status === 'ambiguous' &&
@@ -111,7 +122,9 @@ export const SlotChip: FC<Props> = ({
                         aria-hidden
                     />
                 ) : null}
-                <span className="shrink-0 font-medium">{label}</span>
+                <span className="shrink-0 font-medium">
+                    {SHORT_LABELS[name]}
+                </span>
                 {hasValue && (
                     <span className="min-w-0 truncate">: {slot.value}</span>
                 )}

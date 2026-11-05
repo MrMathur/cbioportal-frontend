@@ -42,7 +42,7 @@ import MutationMapperDataStore, {
 import WindowStore from '../window/WindowStore';
 
 import styles from './mutationMapper.module.scss';
-import { ProteinImpactType } from 'cbioportal-frontend-commons';
+import { ProteinImpactType, WindowWrapper } from 'cbioportal-frontend-commons';
 import DriverAnnotationProteinImpactTypeBadgeSelector from './DriverAnnotationProteinImpactTypeBadgeSelector';
 import { Mutation, PtmSource } from 'cbioportal-utils';
 import { AnnotatedMutation } from 'shared/model/AnnotatedMutation';
@@ -219,8 +219,11 @@ export default class MutationMapper<
         };
     }
 
+    // The base class reads only `size` from it (see its windowWrapper prop);
+    // the portal's store has that shape, with the chat sidebar's width taken
+    // off.
     protected getWindowWrapper() {
-        return WindowStore;
+        return (WindowStore as unknown) as WindowWrapper;
     }
 
     @computed get is3dPanelOpen() {

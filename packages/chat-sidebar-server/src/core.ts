@@ -364,7 +364,9 @@ export interface GuidanceRequest {
 // Classification runs on the chat model unless overridden, as
 // "<provider>:<model>" like the model picker's ids.
 const CLASSIFIER_MODEL_ID = process.env.CLASSIFIER_MODEL_ID;
-const CLASSIFY_TIMEOUT_MS = 30_000;
+// The reply waits for the classification; past this it goes ahead unguided
+// and the sidebar offers to classify the message again.
+const CLASSIFY_TIMEOUT_MS = 45_000;
 
 export async function runClassification(
     message: string,
@@ -383,7 +385,16 @@ export async function runClassification(
     if (abortSignal) signals.push(abortSignal);
     const { output } = await generateText({
         model: getModel(modelId),
-        system: CLASSIFY_PROMPT_TEXT,
+        // The codebook prompt is the same on every call: cached, so only the
+        // per-message part is read anew.
+        instructions: {
+            role: 'system',
+            content: CLASSIFY_PROMPT_TEXT,
+            providerOptions: {
+                anthropic: { cacheControl: { type: 'ephemeral' } },
+                bedrock: { cachePoint: { type: 'default' } },
+            },
+        },
         messages: [
             {
                 role: 'user',
@@ -391,6 +402,9 @@ export async function runClassification(
             },
         ],
         output: Output.object({ schema: RawClassificationSchema }),
+        // Filling in the codebook's fields needs no extended thinking, and
+        // it roughly halves the output the reply waits for.
+        reasoning: 'none',
         abortSignal: AbortSignal.any(signals),
     });
     return {
@@ -458,6 +472,11 @@ export async function runChat(
                     type: 'data-classification',
                     data: classification.value,
                 });
+            } else if (classification.failedMessage) {
+                writer.write({
+                    type: 'data-classification-error',
+                    data: { message: classification.failedMessage },
+                });
             }
             const replySystem = classification.value
                 ? `${system}\n\n${guidanceBlock(
@@ -472,6 +491,60 @@ export async function runChat(
     await pipeUIMessageStreamToResponse({ response: res, stream });
 }
 
+/**
+ * Classifies one message outside a chat turn: the sidebar's retry after a
+ * classification failed. Logged like a turn's classification.
+ */
+export async function runStandaloneClassification(
+    message: string,
+    guidance: GuidanceRequest,
+    model: string | undefined,
+    pageHref: string | undefined,
+    abortSignal: AbortSignal
+): Promise<Classification> {
+    const modelId = model || AVAILABLE_MODELS[0]?.id;
+    if (!modelId) {
+        throw new Error('No model available — see AVAILABLE_MODELS.');
+    }
+    const base = {
+        session_id: guidance.sessionId,
+        participant: guidance.participant,
+        thread_id: guidance.threadId,
+    };
+    try {
+        const {
+            classification,
+            modelId: usedModel,
+            latencyMs,
+        } = await runClassification(
+            message,
+            guidance.context,
+            modelId,
+            pageHref,
+            abortSignal
+        );
+        void logGuidanceEvent({
+            ...base,
+            event: 'classification',
+            payload: {
+                classification,
+                model: usedModel,
+                latency_ms: latencyMs,
+                page_href: pageHref ?? null,
+                retry: true,
+            },
+        });
+        return classification;
+    } catch (err) {
+        void logGuidanceEvent({
+            ...base,
+            event: 'classification_error',
+            payload: { message, error: describeError(err), retry: true },
+        });
+        throw err;
+    }
+}
+
 // A new user message is classified; a continuation after a client-side tool
 // call (the last message is the assistant's) reuses the turn's classification.
 // A failed classification is logged and the reply goes ahead unguided.
@@ -480,7 +553,12 @@ async function classifyTurn(
     guidance: GuidanceRequest,
     modelId: string,
     pageHref: string | undefined
-): Promise<{ value: Classification | undefined; fresh: boolean }> {
+): Promise<{
+    value: Classification | undefined;
+    fresh: boolean;
+    // The message whose classification failed, so the sidebar can retry it.
+    failedMessage?: string;
+}> {
     const last = uiMessages.at(-1);
     const previous = findLatestClassification(uiMessages);
     if (last?.role !== 'user') return { value: previous, fresh: false };
@@ -527,7 +605,7 @@ async function classifyTurn(
             event: 'classification_error',
             payload: { message, error: describeError(err) },
         });
-        return { value: undefined, fresh: false };
+        return { value: undefined, fresh: false, failedMessage: message };
     }
 }
 

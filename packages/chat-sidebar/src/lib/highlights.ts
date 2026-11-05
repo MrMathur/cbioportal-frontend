@@ -154,9 +154,10 @@ function requestKey(question: string, p: HighlightsPage): string {
 
 // What the highlights are chosen for: the latest message while it is an
 // interface question ("where is the download button?"), otherwise the
-// research question.
+// working question, or the broad aim while there is none (an exploring
+// question).
 function highlightQuery(research: ActiveResearch): string {
-    return research.interfaceQuery || research.question;
+    return research.interfaceQuery || research.question || research.aim;
 }
 
 function publish(next: HighlightsState): void {

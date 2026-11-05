@@ -9,6 +9,7 @@ import {
     runFollowups,
     runHighlights,
     runReport,
+    runStandaloneClassification,
     runTitle,
 } from './core.js';
 import { parseCandidates } from './highlights.js';
@@ -72,6 +73,34 @@ app.post('/api/chat/message', async (req, res) => {
             const message = err instanceof Error ? err.message : 'chat failed';
             res.status(500).json({ error: message });
         }
+    }
+});
+
+// Classifies one message again, after its classification failed during the
+// chat turn (the guided assistant's retry).
+app.post('/api/chat/classify', async (req, res) => {
+    const { message, model, pageHref, guidance } = req.body ?? {};
+    if (typeof message !== 'string' || !message.trim() || !guidance) {
+        res.status(400).json({ error: 'message and guidance required' });
+        return;
+    }
+    const controller = new AbortController();
+    res.on('close', () => controller.abort());
+    try {
+        const classification = await runStandaloneClassification(
+            message.trim().slice(0, 4000),
+            parseGuidanceContext(guidance),
+            typeof model === 'string' ? model : undefined,
+            typeof pageHref === 'string' ? pageHref : undefined,
+            controller.signal
+        );
+        res.json({ classification });
+    } catch (err) {
+        if (controller.signal.aborted) return;
+        console.error('classification retry failed:', err);
+        const text =
+            err instanceof Error ? err.message : 'classification failed';
+        res.status(500).json({ error: text });
     }
 });
 

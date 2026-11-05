@@ -19,6 +19,7 @@ const BASE_COLUMNS = [
     'multi_part',
     'answerability',
     'move',
+    'open_study_applies',
     'needs_groups',
     'core_slots',
 ];
@@ -100,6 +101,7 @@ export function entryToRow(entry: Json): Record<string, unknown> {
             multi_part: c.multi_part,
             answerability: c.answerability,
             move: c.move,
+            open_study_applies: c.open_study_applies,
             needs_groups: c.needs_groups,
             core_slots: c.core_slots,
             broad_aim: c.drafts?.broad_aim,
@@ -115,8 +117,10 @@ export function entryToRow(entry: Json): Record<string, unknown> {
             row[`${n}_source`] = s.source;
             row[`${n}_options`] = s.options;
         }
-    } else if (typeof payload.message === 'string') {
-        row.message = payload.message;
+    } else {
+        if (typeof payload.message === 'string') row.message = payload.message;
+        // Page changes carry their own move (refine, broaden, sibling).
+        if (typeof payload.move === 'string') row.move = payload.move;
     }
     row.model = payload.model;
     row.latency_ms = payload.latency_ms;
@@ -132,6 +136,7 @@ export function entryToRow(entry: Json): Record<string, unknown> {
                 'latency_ms',
                 'error',
                 'message',
+                'move',
             ].includes(key)
         ) {
             details[key] = value;

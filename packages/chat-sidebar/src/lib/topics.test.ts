@@ -9,7 +9,10 @@ import {
 } from './classification';
 import { templateQuestion } from './researchTemplate';
 import {
+    addPageAction,
     addQuestion,
+    pageActionMove,
+    PAGE_ACTION_WINDOW_MS,
     compactQuestions,
     findingFromReply,
     matchesSearch,
@@ -204,4 +207,90 @@ test('relativeTime is compact', () => {
     assert.equal(relativeTime('2026-11-03T11:45:00Z', now), '15 min ago');
     assert.equal(relativeTime('2026-11-03T09:00:00Z', now), '3 h ago');
     assert.equal(relativeTime('2026-11-02T10:00:00Z', now), 'yesterday');
+});
+
+test('pageActionMove: added refines, removed broadens, both is a sibling', () => {
+    assert.equal(pageActionMove([], ['clinical:SEX=Female']), 'refine');
+    assert.equal(pageActionMove(['clinical:SEX=Female'], []), 'broaden');
+    assert.equal(
+        pageActionMove(['clinical:SEX=Female'], ['clinical:SEX=Male']),
+        'sibling'
+    );
+    assert.equal(pageActionMove(['a'], ['a']), null);
+});
+
+function pageAction(before: string[], after: string[], filterText: string) {
+    return {
+        before,
+        after,
+        filterText,
+        aim: 'aim',
+        question: 'q',
+        goal: 'describe' as const,
+        slots: emptySlots(),
+        href: 'https://x.org/study?id=a',
+    };
+}
+
+test('a page change joins the current topic; quick clicks merge', () => {
+    const t0 = new Date('2026-11-05T10:00:00Z');
+    let { topics } = addQuestion(
+        [],
+        classification('KRAS in LUAD', null),
+        undefined,
+        t0
+    );
+    const first = addPageAction(
+        topics,
+        pageAction([], ['clinical:SEX=Female'], 'Sex: Female'),
+        new Date(t0.getTime() + 60_000)
+    );
+    topics = first.topics;
+    assert.equal(topics.length, 1);
+    assert.equal(first.entry?.move, 'refine');
+    assert.equal(first.entry?.text, 'Narrowed on the page: Sex: Female');
+
+    // A second click soon after: judged against the filters before the first.
+    const second = addPageAction(
+        topics,
+        pageAction(['clinical:SEX=Female'], ['clinical:SEX=Male'], 'Sex: Male'),
+        new Date(t0.getTime() + 65_000)
+    );
+    topics = second.topics;
+    assert.equal(topics[0].questions.length, 2);
+    assert.equal(second.entry?.move, 'refine');
+    assert.equal(second.entry?.id, first.entry?.id);
+
+    // Undoing the burst removes the step.
+    const undone = addPageAction(
+        topics,
+        pageAction(['clinical:SEX=Male'], [], ''),
+        new Date(t0.getTime() + 70_000)
+    );
+    assert.equal(undone.entry, undefined);
+    assert.equal(undone.topics[0].questions.length, 1);
+
+    // Later, outside the window: a step of its own.
+    const later = addPageAction(
+        topics,
+        pageAction(['clinical:SEX=Male'], [], ''),
+        new Date(t0.getTime() + 65_000 + PAGE_ACTION_WINDOW_MS + 1_000)
+    );
+    assert.equal(later.topics[0].questions.length, 3);
+    assert.equal(later.entry?.move, 'broaden');
+    assert.equal(later.entry?.text, 'Removed the filters on the page');
+});
+
+test('no topic yet: a page change is not recorded', () => {
+    const result = addPageAction([], pageAction([], ['x'], 'X'));
+    assert.equal(result.topics.length, 0);
+    assert.equal(result.entry, undefined);
+});
+
+test('findings attach to the question, not a later page step', () => {
+    let { topics } = addQuestion([], classification('q', null), undefined);
+    topics = addPageAction(topics, pageAction([], ['x'], 'X')).topics;
+    const updated = updateLatestQuestion(topics, { finding: 'Found.' });
+    assert.equal(updated[0].questions[0].finding, 'Found.');
+    assert.equal(updated[0].questions[1].finding, undefined);
 });

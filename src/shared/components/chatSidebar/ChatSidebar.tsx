@@ -1,6 +1,14 @@
 import * as React from 'react';
 import { observer } from 'mobx-react';
-import { observable, makeObservable, action } from 'mobx';
+import {
+    observable,
+    makeObservable,
+    action,
+    computed,
+    reaction,
+    IReactionDisposer,
+} from 'mobx';
+import WindowStore from 'shared/components/window/WindowStore';
 import { getLoadConfig } from 'config/config';
 import { getChatServerBase, getChatOrigin } from './chatServerBase';
 import { goToPage, normalizeBasePath } from './navigateTool';
@@ -31,6 +39,12 @@ const MODE_STORAGE_KEY = 'chat-sidebar:mode';
 const LEGACY_OPEN_STORAGE_KEY = 'chat-sidebar:open';
 const WIDTH_STORAGE_KEY = 'chat-sidebar:width';
 const KEYBOARD_RESIZE_STEP = 20;
+// Width of the collapsed rail, as in ChatSidebar.scss.
+const RAIL_WIDTH = 48;
+// Below this much page width, the sidebar overlays the page rather than
+// squeezing it (e.g. a narrow window with the chat dragged wide).
+const MIN_PAGE_WIDTH = 480;
+const RESERVED_WIDTH_VAR = '--chat-sidebar-reserved-width';
 // Opt-in flags passed on to the iframe: the guided assistant (request
 // classification, research question levels, earlier questions) and its
 // per-reply debug badge.
@@ -83,6 +97,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
     private iframeRef = React.createRef<HTMLIFrameElement>();
     private webMcp = new PortalWebMcp();
     private pageEvents = new PageEventPublisher();
+    private disposeReservedWidth?: IReactionDisposer;
     private resizeStartX = 0;
     private resizeStartWidth = DEFAULT_CHAT_SIDEBAR_WIDTH;
 
@@ -112,6 +127,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         this.resizing = false;
         document.body.classList.remove('chat-sidebar-resizing');
         this.storeWidth();
+        this.committedWidth = this.width;
     }
 
     @action.bound
@@ -140,7 +156,33 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         );
     }
 
+    // The width the page leaves free for the sidebar: all of it when
+    // expanded, the rail when collapsed. Held at its last value while
+    // dragging, so heavy views re-lay out once the drag ends.
+    @computed get reservedWidth(): number {
+        if (this.mode === 'hidden') return 0;
+        const width = this.mode === 'rail' ? RAIL_WIDTH : this.committedWidth;
+        return this.viewportWidth - width >= MIN_PAGE_WIDTH ? width : 0;
+    }
+
+    @observable private committedWidth = this.width;
+    @observable private viewportWidth = window.innerWidth;
+
+    private applyReservedWidth(width: number) {
+        document.documentElement.style.setProperty(
+            RESERVED_WIDTH_VAR,
+            `${width}px`
+        );
+        document.body.classList.toggle('chat-sidebar-reserving', width > 0);
+        WindowStore.setReservedRight(width);
+    }
+
     componentDidMount() {
+        this.disposeReservedWidth = reaction(
+            () => this.reservedWidth,
+            width => this.applyReservedWidth(width),
+            { fireImmediately: true }
+        );
         window.addEventListener('message', this.onMessage);
         window.addEventListener('resize', this.onWindowResize);
         this.onWindowResize();
@@ -155,6 +197,8 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         window.removeEventListener('resize', this.onWindowResize);
         document.body.classList.remove('chat-sidebar-closed');
         document.body.classList.remove('chat-sidebar-resizing');
+        this.disposeReservedWidth?.();
+        this.applyReservedWidth(0);
         clearHighlights();
         this.webMcp.stop();
         this.pageEvents.stop();
@@ -163,6 +207,8 @@ export default class ChatSidebar extends React.Component<{}, {}> {
     @action.bound
     onWindowResize() {
         this.width = this.clampWidth(this.width);
+        this.viewportWidth = window.innerWidth;
+        if (!this.resizing) this.committedWidth = this.width;
     }
 
     @action.bound
@@ -221,6 +267,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         e.preventDefault();
         this.width = this.clampWidth(nextWidth);
         this.storeWidth();
+        this.committedWidth = this.width;
     }
 
     // The iframe posts a portal path here since it can't call routingStore

@@ -3,6 +3,7 @@ import _ from 'lodash';
 import $ from 'jquery';
 import URL from 'url';
 import { inject, observer } from 'mobx-react';
+import WindowStore from 'shared/components/window/WindowStore';
 import {
     action,
     computed,
@@ -107,6 +108,9 @@ function addOnBecomeVisibleListener(callback: () => void) {
 export interface IResultsViewPageProps {
     params: any; // from react router
 }
+
+// The page's side gutters, left out of the width the tabs may use.
+const RESULTS_TABS_MARGIN = 40;
 
 @observer
 export default class ResultsViewPage extends React.Component<
@@ -856,6 +860,12 @@ export default class ResultsViewPage extends React.Component<
                                             )
                                         }
                                         className="mainTabs"
+                                        // Pages the tabs with arrows when they
+                                        // don't fit beside the chat sidebar.
+                                        getPaginationWidth={() =>
+                                            WindowStore.size.width -
+                                            RESULTS_TABS_MARGIN
+                                        }
                                         hrefRoot={buildCBioPortalPageUrl(
                                             'results'
                                         )}

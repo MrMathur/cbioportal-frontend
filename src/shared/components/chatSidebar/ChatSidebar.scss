@@ -1,3 +1,35 @@
+/* The page leaves the sidebar's width free on the right (ChatSidebar sets the
+ * variable), so it sits beside the portal's tools rather than over them.
+ * `html:root body` outranks global.scss's `body { padding: 0 }`, which is
+ * compiled scoped as `.cbioportal-frontend body`. */
+html:root body {
+    padding-right: var(--chat-sidebar-reserved-width, 0px);
+}
+
+/* With the sidebar's width taken, pages must fit in less than the portal's
+ * usual 1200px minimum: the minimum is dropped, the top navigation wraps,
+ * and the home page's news column moves below the study selector. The
+ * `html:root body` prefix outranks the portal's scoped global styles. */
+html:root body.chat-sidebar-reserving {
+    .contentWidth {
+        min-width: 0;
+    }
+
+    #leftHeaderContent {
+        min-width: 0;
+        flex-wrap: wrap;
+    }
+
+    #main-nav,
+    #main-nav ul {
+        white-space: normal;
+    }
+
+    .homePageLayout {
+        flex-wrap: wrap;
+    }
+}
+
 .chat-sidebar-launcher {
     position: fixed;
     right: 20px;

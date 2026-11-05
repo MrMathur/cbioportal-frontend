@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filtersFromHref, slotsFromPage } from './pageSlots';
+import {
+    filterKeysFromHref,
+    filtersFromHref,
+    slotsFromPage,
+} from './pageSlots';
 import { CATALOG } from './testCatalog';
 
 const filter = {
@@ -77,4 +81,21 @@ test('Results View: the gene query is the entity', () => {
 
 test('other pages set nothing', () => {
     assert.deepEqual(slotsFromPage('https://x.org/', {}), {});
+});
+
+test('filterKeysFromHref lists Study View filters by id', () => {
+    const href = `https://x.org/study/summary?id=luad_broad#filterJson=${JSON.stringify(
+        filter
+    )}`;
+    assert.deepEqual(filterKeysFromHref(href), [
+        'clinical:AGE=40-60',
+        'clinical:CANCER_TYPE_DETAILED=Lung Adenocarcinoma',
+        'clinical:SEX=Female',
+        'gene:KRAS',
+    ]);
+    assert.deepEqual(filterKeysFromHref('https://x.org/study?id=a'), []);
+    assert.equal(
+        filterKeysFromHref('https://x.org/results?cancer_study_list=a'),
+        null
+    );
 });

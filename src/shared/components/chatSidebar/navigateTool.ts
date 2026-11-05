@@ -7,6 +7,7 @@
 
 import { getBrowserWindow } from 'cbioportal-frontend-commons';
 import { getLoadConfig } from 'config/config';
+import { getCurrentPageStore } from './currentPageStore';
 
 export const GO_TO_PAGE_TOOL_NAME = 'go_to_page';
 
@@ -88,8 +89,43 @@ export function goToPage(url: string): { navigated: boolean } {
     if (route === null) {
         return { navigated: false };
     }
+    resetStudyViewForRoute(route);
     // push takes the URL as-is; updateRoute would rebuild it with the current
     // page's hash in place of the link's (filterJson, navCaseIds).
     getBrowserWindow().routingStore.push(route);
     return { navigated: true };
+}
+
+// The parts of StudyViewPageStore used here, so this module doesn't pull in
+// the whole store.
+interface StudyViewStoreLike {
+    clearAllFilters(): void;
+    studyViewQueryFilter: unknown;
+}
+
+function isStudyViewStore(store: unknown): store is StudyViewStoreLike {
+    return (
+        typeof store === 'object' &&
+        store !== null &&
+        typeof (store as StudyViewStoreLike).clearAllFilters === 'function' &&
+        'studyViewQueryFilter' in store
+    );
+}
+
+/**
+ * A Study View link opened while Study View is already showing reuses its
+ * store, which only adds the link's filters to the ones already applied (and
+ * applies nothing when the link has none, or when the URL is unchanged). The
+ * chat's links describe the whole view, so the store is cleared and made to
+ * read the new URL from scratch.
+ */
+export function resetStudyViewForRoute(route: string): void {
+    const pathname = route.split(/[?#]/)[0];
+    if (!/^\/study(\/|$)/.test(pathname)) return;
+    const store = getCurrentPageStore();
+    if (!isStudyViewStore(store)) return;
+    store.clearAllFilters();
+    // Differs from any URL's query, so StudyViewPage re-applies the URL even
+    // when it hasn't changed.
+    store.studyViewQueryFilter = {};
 }

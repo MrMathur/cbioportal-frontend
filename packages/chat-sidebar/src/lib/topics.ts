@@ -9,6 +9,12 @@ export type QuestionMove = 'start' | 'same' | 'refine' | 'broaden' | 'sibling';
 export interface QuestionEntry {
     id: string;
     at: string;
+    // A question asked in the chat, or a change the user made on the page
+    // (Study View filters), recorded as a step of the current topic.
+    kind?: 'question' | 'page';
+    // For a page change: the filters before it (filterKeysFromHref), so a
+    // burst of clicks is judged as one change.
+    pageBaseline?: string[];
     text: string;
     move: QuestionMove;
     requestType: Classification['request_type'];
@@ -63,6 +69,7 @@ export function addQuestion(
     const entry: QuestionEntry = {
         id: newId(),
         at,
+        kind: 'question',
         text: c.message,
         move: startsTopic ? 'start' : (c.move as QuestionMove),
         requestType: c.request_type,
@@ -97,7 +104,10 @@ export function addQuestion(
     return { topics: [updated, ...topics.slice(1)], entry };
 }
 
-/** Applies a change to the latest question of the latest topic. */
+/**
+ * Applies a change to the latest question asked in the chat in the latest
+ * topic (page changes recorded after it are skipped).
+ */
 export function updateLatestQuestion(
     topics: readonly Topic[],
     patch: Partial<Pick<QuestionEntry, 'href' | 'finding'>>
@@ -105,14 +115,17 @@ export function updateLatestQuestion(
     const current = topics[0];
     if (!current || current.questions.length === 0) return [...topics];
     const questions = [...current.questions];
-    const last = questions[questions.length - 1];
+    let index = questions.length - 1;
+    while (index > 0 && questions[index].kind === 'page') index--;
+    const last = questions[index];
+    if (last.kind === 'page') return [...topics];
     if (
         (patch.href === undefined || patch.href === last.href) &&
         (patch.finding === undefined || patch.finding === last.finding)
     ) {
         return [...topics];
     }
-    questions[questions.length - 1] = { ...last, ...patch };
+    questions[index] = { ...last, ...patch };
     return [{ ...current, questions }, ...topics.slice(1)];
 }
 
@@ -188,4 +201,114 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
     if (hours < 24) return `${hours} h ago`;
     const days = Math.round(hours / 24);
     return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
+// Filter clicks this close together are one change.
+export const PAGE_ACTION_WINDOW_MS = 30_000;
+
+/**
+ * The move a change of page filters makes: only filters added narrows the
+ * question (refine), only filters removed widens it (broaden), both is a
+ * parallel variation (sibling), e.g. Female → Male. Null when nothing changed.
+ */
+export function pageActionMove(
+    before: readonly string[],
+    after: readonly string[]
+): 'refine' | 'broaden' | 'sibling' | null {
+    const b = new Set(before);
+    const a = new Set(after);
+    const added = [...a].some(k => !b.has(k));
+    const removed = [...b].some(k => !a.has(k));
+    if (added && removed) return 'sibling';
+    if (added) return 'refine';
+    if (removed) return 'broaden';
+    return null;
+}
+
+export interface PageAction {
+    // Filters before and after the change.
+    before: string[];
+    after: string[];
+    // What the page now filters on, for display ("Sex: Female; ...").
+    filterText: string;
+    aim: string;
+    question: string;
+    goal: Classification['goal'];
+    slots: Slots;
+    href: string;
+}
+
+function describePageAction(
+    move: 'refine' | 'broaden' | 'sibling',
+    filterText: string
+): string {
+    if (!filterText) return 'Removed the filters on the page';
+    switch (move) {
+        case 'refine':
+            return `Narrowed on the page: ${filterText}`;
+        case 'broaden':
+            return `Widened on the page: ${filterText}`;
+        case 'sibling':
+            return `Changed the filters on the page: ${filterText}`;
+    }
+}
+
+/**
+ * Records a filter change on the page as a step of the current topic.
+ * Changes within PAGE_ACTION_WINDOW_MS of the previous one, with no question
+ * in between, update that entry instead, judged from the filters before the
+ * first of them; a burst that ends where it started removes the entry.
+ * Returns the topics unchanged when there is no topic to add to.
+ */
+export function addPageAction(
+    topics: readonly Topic[],
+    action: PageAction,
+    now: Date = new Date()
+): { topics: Topic[]; entry?: QuestionEntry } {
+    const current = topics[0];
+    if (!current) return { topics: [...topics] };
+    const questions = [...current.questions];
+    const last = questions[questions.length - 1];
+    const merging =
+        last?.kind === 'page' &&
+        now.getTime() - new Date(last.at).getTime() <= PAGE_ACTION_WINDOW_MS;
+    const baseline = merging
+        ? last.pageBaseline ?? action.before
+        : action.before;
+    const move = pageActionMove(baseline, action.after);
+    if (merging) questions.pop();
+    if (!move) {
+        return {
+            topics: merging
+                ? [{ ...current, questions }, ...topics.slice(1)]
+                : [...topics],
+        };
+    }
+    const entry: QuestionEntry = {
+        id: merging ? last.id : newId(),
+        at: now.toISOString(),
+        kind: 'page',
+        pageBaseline: baseline,
+        text: describePageAction(move, action.filterText),
+        move,
+        requestType: 'data',
+        level: null,
+        goal: action.goal,
+        aim: action.aim,
+        question: action.question,
+        slots: action.slots,
+        href: action.href,
+    };
+    questions.push(entry);
+    return {
+        topics: [
+            {
+                ...current,
+                updatedAt: entry.at,
+                questions: questions.slice(-MAX_QUESTIONS_PER_TOPIC),
+            },
+            ...topics.slice(1),
+        ],
+        entry,
+    };
 }

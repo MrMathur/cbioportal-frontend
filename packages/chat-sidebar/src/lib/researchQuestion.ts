@@ -12,11 +12,14 @@ import { logGuidanceEvent } from './guidanceLog';
 import { templateQuestion } from './researchTemplate';
 import { PREFIX } from './threadStorage';
 import {
+    addPageAction,
     addQuestion,
     QuestionEntry,
     Topic,
     updateLatestQuestion,
 } from './topics';
+import { filterKeysFromHref } from './pageSlots';
+import { studyIdsFromHref } from './pageStudies';
 
 // Each chat's research question, which drives the page highlights
 // (highlights.ts), plus whether the user has dismissed them and turned on
@@ -47,6 +50,9 @@ export interface ResearchState {
     // The user changed the question or its slots since the last message, so
     // the box offers to ask with it.
     editedSinceMessage: boolean;
+    // The latest message when its classification failed, so the box can say
+    // it is out of date and offer to classify it again; empty otherwise.
+    failedMessage: string;
     topics: Topic[];
 }
 
@@ -71,6 +77,7 @@ function empty(): ResearchState {
         questionByUser: false,
         interfaceQuery: '',
         editedSinceMessage: false,
+        failedMessage: '',
         topics: [],
     };
 }
@@ -129,6 +136,7 @@ function read(threadId: string): ResearchState {
                 questionByUser: parsed.questionByUser === true,
                 interfaceQuery: str(parsed.interfaceQuery),
                 editedSinceMessage: parsed.editedSinceMessage === true,
+                failedMessage: str(parsed.failedMessage),
                 topics: Array.isArray(parsed.topics) ? parsed.topics : [],
             };
         }
@@ -203,6 +211,7 @@ function publish(next: ActiveResearch): void {
         next.questionByUser === active.questionByUser &&
         next.interfaceQuery === active.interfaceQuery &&
         next.editedSinceMessage === active.editedSinceMessage &&
+        next.failedMessage === active.failedMessage &&
         next.topics === active.topics
     ) {
         return;
@@ -427,6 +436,7 @@ export function applyClassification(
             const next: ResearchState = {
                 ...state,
                 editedSinceMessage: false,
+                failedMessage: '',
                 topics: added.topics,
                 interfaceQuery: c.request_type === 'interface' ? c.message : '',
             };
@@ -468,6 +478,18 @@ export function applyClassification(
             question_id: entry?.id,
         });
     }
+}
+
+/** The latest message's classification failed: the box is out of date. */
+export function setClassificationFailed(
+    threadId: string | undefined,
+    localThreadId: string,
+    message: string
+): void {
+    updateThread(threadId, localThreadId, state => ({
+        ...state,
+        failedMessage: message,
+    }));
 }
 
 export function setSlotByUser(
@@ -621,8 +643,8 @@ export function setLatestFinding(
     }));
 }
 
-// The page's slots as last applied, so only changes are synced: a value the
-// chat set from the message stays until the page itself changes.
+// The page's slots as last applied, so a value the chat set from the message
+// stays until the page itself changes.
 let latestPageSlots: Partial<Record<SlotName, string>> = {};
 let appliedPageSlots: Partial<Record<SlotName, string>> = {};
 
@@ -645,9 +667,17 @@ function applyPageSlots(): void {
     const slots: Slots = { ...state.slots };
     for (const name of SLOT_NAMES) {
         const value = latestPageSlots[name];
-        if (value === appliedPageSlots[name]) continue;
         const current = slots[name];
         if (current.source === 'user') continue;
+        // A slot taken from the page always mirrors it, so a value the page
+        // no longer shows (after navigating, or a reload of this frame)
+        // can't linger. A slot the chat set is replaced only when the page
+        // itself changes.
+        if (current.source === 'page') {
+            if (value === current.value) continue;
+        } else if (value === appliedPageSlots[name]) {
+            continue;
+        }
         if (value) {
             slots[name] = {
                 status: 'specified',
@@ -673,4 +703,97 @@ function applyPageSlots(): void {
         slots,
         concrete: concreteFromSlots(slots),
     }));
+}
+
+// --- Page changes the user makes, recorded as steps of the current topic ---
+
+// The page last seen, to tell a filter change on the same study from
+// navigating elsewhere.
+let lastPage:
+    | { href: string; study: string; keys: string[] | null }
+    | undefined;
+// Navigation the sidebar itself triggered (the assistant's go_to_page, a
+// restore): the page it lands on is not the user's own change.
+let expectedNavigationAt = 0;
+const EXPECTED_NAVIGATION_MS = 20_000;
+
+/** Called before the sidebar navigates the portal itself. */
+export function expectPageNavigation(): void {
+    expectedNavigationAt = Date.now();
+}
+
+function pageFilterText(): string {
+    return [
+        latestPageSlots.cohort,
+        latestPageSlots.filter,
+        latestPageSlots.entity && `genes: ${latestPageSlots.entity}`,
+    ]
+        .filter(Boolean)
+        .join('; ');
+}
+
+/**
+ * Called with every settled page, after its slots are applied. A change of
+ * Study View filters on the same study, made by the user, is added to the
+ * current topic as a refine, broaden or sibling step.
+ */
+export function recordPageChange(href: string): void {
+    if (!guidanceEnabled) return;
+    const previous = lastPage;
+    const current = {
+        href,
+        study: [...studyIdsFromHref(href)].sort().join(','),
+        keys: filterKeysFromHref(href),
+    };
+    lastPage = current;
+    if (!previous || previous.href === href) return;
+    if (Date.now() - expectedNavigationAt < EXPECTED_NAVIGATION_MS) {
+        expectedNavigationAt = 0;
+        return;
+    }
+    if (
+        !current.keys ||
+        !previous.keys ||
+        !current.study ||
+        current.study !== previous.study ||
+        active.topics.length === 0
+    ) {
+        return;
+    }
+    const before = previous.keys;
+    const after = current.keys;
+    let recorded: QuestionEntry | undefined;
+    let topicId = '';
+    updateThread(active.threadId, active.localThreadId, state => {
+        const result = addPageAction(state.topics, {
+            before,
+            after,
+            filterText: pageFilterText(),
+            aim: state.aim,
+            question: templateQuestion(state.goal, state.slots),
+            goal: state.goal,
+            slots: state.slots,
+            href,
+        });
+        recorded = result.entry;
+        topicId = result.topics[0]?.id ?? '';
+        return { ...state, topics: result.topics };
+    });
+    // The question before keeps the page it was asked on.
+    trackLatestPage = false;
+    if (recorded) {
+        logGuidanceEvent(
+            'page_action',
+            active.threadId ?? active.localThreadId,
+            {
+                topic_id: topicId,
+                question_id: recorded.id,
+                move: recorded.move,
+                question: recorded.text,
+                old_value: before.join(' | '),
+                new_value: after.join(' | '),
+                href,
+            }
+        );
+    }
 }

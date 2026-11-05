@@ -1,12 +1,28 @@
 import { FC, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { useAui } from '@assistant-ui/react';
-import { ChevronDownIcon, SendIcon } from 'lucide-react';
+import {
+    ChevronDownIcon,
+    CompassIcon,
+    LucideIcon,
+    MessageCircleQuestionIcon,
+    SendIcon,
+    SlidersHorizontalIcon,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { TooltipIconButton } from '@/components/assistant-ui/elements/tooltip-icon-button';
 import { SlotChip } from '@/components/SlotChip';
 import { getStudyContext } from '@/lib/catalog';
 import { SLOT_LABELS, SLOT_NAMES, SlotName } from '@/lib/classification';
 import { logGuidanceEvent } from '@/lib/guidanceLog';
+import { syncPortalToSlots } from '@/lib/portalSync';
+import { retryClassification } from '@/lib/classificationRetry';
 import {
     ActiveResearch,
     setAimByUser,
@@ -16,9 +32,11 @@ import {
 import { cn } from '@/lib/utils';
 
 // The research question at three levels, for the guided assistant: the broad
-// aim (L1), the working question (L3) and the concrete analysis as slots
-// (L4). Filled from each message's classification, editable by the user.
-// Gaps show as empty or flagged slots rather than as a level of their own.
+// aim, the working question and the concrete analysis as slots. Filled from
+// each message's classification, editable by the user. Gaps show as empty or
+// flagged slots rather than as a level of their own. Kept compact: each level
+// is one line marked by an icon, named in its tooltip, so the chat below
+// keeps most of the sidebar's height.
 
 const EXPANDED_KEY = 'chat-sidebar:researchExpanded';
 
@@ -70,8 +88,11 @@ const EditableText: FC<{
     placeholder: string;
     label: string;
     emphasis?: boolean;
+    // Lines shown before the text is cut; the full text is in the tooltip
+    // and the editor.
+    clamp: 1 | 3;
     onSave: (value: string) => void;
-}> = ({ value, placeholder, label, emphasis, onSave }) => {
+}> = ({ value, placeholder, label, emphasis, clamp, onSave }) => {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState(value);
     const ref = useRef<HTMLTextAreaElement>(null);
@@ -115,18 +136,23 @@ const EditableText: FC<{
     return (
         <button
             type="button"
-            title={`Edit ${label.toLowerCase()}`}
+            title={
+                value
+                    ? `${value}\n\nClick to edit`
+                    : `Edit ${label.toLowerCase()}`
+            }
             onClick={() => {
                 setDraft(value);
                 setEditing(true);
             }}
             className={cn(
                 'w-full cursor-text rounded-md text-left leading-snug',
+                value && (clamp === 1 ? 'truncate' : 'line-clamp-3'),
                 value
                     ? emphasis
                         ? 'text-sm text-foreground hover:text-foreground/80'
                         : 'text-xs text-foreground/80 hover:text-foreground'
-                    : 'border border-dashed border-border px-2 py-1 text-xs text-muted-foreground hover:border-[#3786c2]/50 hover:text-foreground'
+                    : 'border border-dashed border-border px-1.5 py-0.5 text-xs text-muted-foreground hover:border-[#3786c2]/50 hover:text-foreground'
             )}
         >
             {value || placeholder}
@@ -134,14 +160,34 @@ const EditableText: FC<{
     );
 };
 
-const LevelLabel: FC<{ children: string; level: string }> = ({
-    children,
-    level,
+// Marks a level's line; its name is in the tooltip.
+const LevelIcon: FC<{ icon: LucideIcon; label: string; hint: string }> = ({
+    icon: Icon,
+    label,
+    hint,
 }) => (
-    <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-        <span>{children}</span>
-        <span className="rounded bg-muted px-1 text-[9px]">{level}</span>
-    </div>
+    <TooltipProvider>
+        <Tooltip>
+            <TooltipTrigger
+                render={
+                    <span
+                        tabIndex={0}
+                        aria-label={label}
+                        className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    />
+                }
+            >
+                <Icon className="size-3.5" aria-hidden />
+            </TooltipTrigger>
+            <TooltipContent
+                side="left"
+                className="max-w-56 flex-col items-start gap-0.5"
+            >
+                <span className="font-semibold">{label}</span>
+                <span className="opacity-80">{hint}</span>
+            </TooltipContent>
+        </Tooltip>
+    </TooltipProvider>
 );
 
 export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
@@ -149,6 +195,21 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
 }) => {
     const aui = useAui();
     const [expanded, setExpanded] = useState(readExpanded);
+    const [retry, setRetry] = useState<'idle' | 'running' | 'failed'>('idle');
+
+    // A new failure (or none) starts from the plain notice.
+    useEffect(() => setRetry('idle'), [research.failedMessage]);
+
+    const onRetry = async () => {
+        setRetry('running');
+        try {
+            await retryClassification(aui.thread.getState().messages);
+            setRetry('idle');
+        } catch (err) {
+            console.warn('[chat-sidebar] classification retry failed', err);
+            setRetry('failed');
+        }
+    };
     const threadId = research.threadId;
     const localId = research.localThreadId;
     const logThread = threadId ?? localId;
@@ -195,27 +256,78 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
         );
     };
 
+    const gapNote = [
+        gaps ? `${gaps} to clarify` : '',
+        coreMissing ? `${coreMissing} missing` : '',
+    ]
+        .filter(Boolean)
+        .join(' · ');
+
     return (
-        <div className="mt-1">
-            <div className="flex items-start gap-1">
+        <div className="mt-1 space-y-1">
+            {research.failedMessage && (
+                <div
+                    role="status"
+                    className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-800 dark:text-amber-200"
+                >
+                    <span className="min-w-0 flex-1 truncate">
+                        {retry === 'failed'
+                            ? 'Still couldn’t read your last message.'
+                            : 'Not updated from your last message.'}
+                    </span>
+                    <Button
+                        variant="link"
+                        size="xs"
+                        className="h-auto shrink-0 px-0 text-[11px]"
+                        disabled={retry === 'running'}
+                        onClick={() => void onRetry()}
+                    >
+                        {retry === 'running' ? 'Updating…' : 'Retry'}
+                    </Button>
+                </div>
+            )}
+            <div className="flex items-start gap-1.5">
+                <LevelIcon
+                    icon={MessageCircleQuestionIcon}
+                    label="Working question"
+                    hint="The question you are answering now. Click it to edit."
+                />
                 <div className="min-w-0 flex-1">
-                    {expanded && (
-                        <LevelLabel level="L3">Working question</LevelLabel>
-                    )}
                     <EditableText
                         value={research.question}
                         label="Working question"
                         placeholder={
                             hasAnything
                                 ? 'Write your question'
-                                : 'Ask in the chat below, or write your aim or question here; the rest is drafted for you.'
+                                : 'Ask in the chat, or write your question here'
                         }
                         emphasis
+                        clamp={3}
                         onSave={text =>
                             setQuestionByUser(threadId, localId, text)
                         }
                     />
                 </div>
+                {!expanded && hasAnything && gapNote && (
+                    <button
+                        type="button"
+                        onClick={toggle}
+                        title="Show the analysis parts"
+                        className="mt-0.5 shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] leading-4 text-amber-800 dark:text-amber-200"
+                    >
+                        {gapNote}
+                    </button>
+                )}
+                {research.editedSinceMessage && research.question && (
+                    <TooltipIconButton
+                        tooltip="Ask with this question"
+                        size="icon-xs"
+                        className="text-[#3786c2]"
+                        onClick={() => ask(research.question, 'send_question')}
+                    >
+                        <SendIcon />
+                    </TooltipIconButton>
+                )}
                 <Button
                     variant="ghost"
                     size="icon-xs"
@@ -227,7 +339,7 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
                     }
                     title={expanded ? 'Collapse' : 'Expand'}
                     onClick={toggle}
-                    className="mt-0.5 text-muted-foreground"
+                    className="text-muted-foreground"
                 >
                     <ChevronDownIcon
                         className={cn(
@@ -238,33 +350,33 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
                 </Button>
             </div>
 
-            {!expanded && hasAnything && (gaps > 0 || coreMissing > 0) && (
-                <p className="mt-0.5 text-[11px] text-amber-700 dark:text-amber-300">
-                    {[
-                        gaps ? `${gaps} to clarify` : '',
-                        coreMissing ? `${coreMissing} missing` : '',
-                    ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                </p>
-            )}
-
             {expanded && (
-                <div className="mt-2 space-y-2">
-                    <div>
-                        <LevelLabel level="L1">Broad aim</LevelLabel>
-                        <EditableText
-                            value={research.aim}
+                <>
+                    <div className="flex items-start gap-1.5">
+                        <LevelIcon
+                            icon={CompassIcon}
                             label="Broad aim"
-                            placeholder="e.g. Understand KRAS in lung cancer"
-                            onSave={text =>
-                                setAimByUser(threadId, localId, text)
-                            }
+                            hint="What you want to understand overall."
                         />
+                        <div className="min-w-0 flex-1">
+                            <EditableText
+                                value={research.aim}
+                                label="Broad aim"
+                                placeholder="Broad aim, e.g. Understand KRAS in lung cancer"
+                                clamp={1}
+                                onSave={text =>
+                                    setAimByUser(threadId, localId, text)
+                                }
+                            />
+                        </div>
                     </div>
-                    <div>
-                        <LevelLabel level="L4">Concrete analysis</LevelLabel>
-                        <div className="flex flex-wrap gap-1">
+                    <div className="flex items-start gap-1.5">
+                        <LevelIcon
+                            icon={SlidersHorizontalIcon}
+                            label="Concrete analysis"
+                            hint="The parts of the analysis. Dashed parts are missing, amber ones need a choice; click one to set it."
+                        />
+                        <div className="flex min-w-0 flex-1 flex-wrap gap-1">
                             {SLOT_NAMES.map(name => (
                                 <SlotChip
                                     key={name}
@@ -276,38 +388,22 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
                                         name === 'measure'
                                     }
                                     suggestions={suggestionsFor(name, research)}
-                                    onSet={(value, via) =>
+                                    onSet={(value, via) => {
                                         setSlotByUser(
                                             threadId,
                                             localId,
                                             name,
                                             value,
                                             via
-                                        )
-                                    }
+                                        );
+                                        syncPortalToSlots();
+                                    }}
                                     onAsk={() => askAboutSlot(name)}
                                 />
                             ))}
                         </div>
-                        {research.concrete && (
-                            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                                {research.concrete}
-                            </p>
-                        )}
                     </div>
-                </div>
-            )}
-
-            {research.editedSinceMessage && research.question && (
-                <Button
-                    size="xs"
-                    variant="outline"
-                    className="mt-2"
-                    onClick={() => ask(research.question, 'send_question')}
-                >
-                    <SendIcon />
-                    Ask with this question
-                </Button>
+                </>
             )}
         </div>
     );

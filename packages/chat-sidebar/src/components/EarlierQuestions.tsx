@@ -10,12 +10,14 @@ import {
     ChevronDownIcon,
     ChevronRightIcon,
     HistoryIcon,
+    MousePointerClickIcon,
     RotateCcwIcon,
     SearchIcon,
 } from 'lucide-react';
 import { getLatestPageEvents } from '@/lib/page-events';
 import { notifyNavigate, resolvePortalLink } from '@/lib/portal-link';
 import {
+    expectPageNavigation,
     getActiveResearch,
     restoreQuestion,
     subscribeToResearch,
@@ -94,7 +96,20 @@ const QuestionRow: FC<{
             {MOVE_LABELS[entry.move]}
         </span>
         <div className="min-w-0 flex-1">
-            <p className="line-clamp-2 text-xs leading-snug text-foreground">
+            <p
+                className={cn(
+                    'line-clamp-2 text-xs leading-snug',
+                    entry.kind === 'page'
+                        ? 'text-muted-foreground'
+                        : 'text-foreground'
+                )}
+            >
+                {entry.kind === 'page' && (
+                    <MousePointerClickIcon
+                        className="mr-1 inline size-3 align-[-2px]"
+                        aria-label="Changed on the page:"
+                    />
+                )}
                 {entry.text}
             </p>
             {entry.finding && (
@@ -106,7 +121,11 @@ const QuestionRow: FC<{
         <button
             type="button"
             onClick={onRestore}
-            title="Restore this question, its slots and its page"
+            title={
+                entry.kind === 'page'
+                    ? 'Restore this step: its slots and the page filters'
+                    : 'Restore this question, its slots and its page'
+            }
             aria-label={`Restore: ${entry.text}`}
             className="mt-px shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100"
         >
@@ -254,7 +273,10 @@ export const EarlierQuestions: FC = () => {
         const current = getLatestPageEvents().settledSnapshot?.href;
         if (current === entry.href) return;
         const path = restorePath(entry.href);
-        if (path) notifyNavigate(path);
+        if (path) {
+            expectPageNavigation();
+            notifyNavigate(path);
+        }
     };
 
     return (
