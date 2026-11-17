@@ -62,6 +62,11 @@ export type IFixedHeaderTableProps<T> = {
     onRowClick?: (data: T) => void;
     headerClassName?: string;
     highlightedRowClassName?: (data: T) => string;
+    // A temporary mark on a row. Not tied to selection, unlike
+    // highlightedRowClassName.
+    transientRowClassName?: (data: T) => string | undefined;
+    // Picks the marked row to scroll into view, if any.
+    isTransientRowInFocus?: (data: T) => boolean;
     autoFocusSearchAfterRendering?: boolean;
     afterSorting?: (sortBy: string, sortDirection: SortDirection) => void;
     afterFiltering?: (filterString: string) => void;
@@ -412,7 +417,9 @@ export default class FixedHeaderTable<T> extends React.Component<
             >
                 {!this.props.showControlsAtTop && (
                     <input
-                        placeholder={this.props.searchPlaceholder || 'Search...'}
+                        placeholder={
+                            this.props.searchPlaceholder || 'Search...'
+                        }
                         type="text"
                         onInput={this.onFilterTextChange()}
                         aria-label="Search table"
@@ -475,7 +482,9 @@ export default class FixedHeaderTable<T> extends React.Component<
                     ))}
                 {this.props.showControlsAtTop && (
                     <input
-                        placeholder={this.props.searchPlaceholder || 'Search...'}
+                        placeholder={
+                            this.props.searchPlaceholder || 'Search...'
+                        }
                         type="text"
                         onInput={this.onFilterTextChange()}
                         ref={this.setInputRef}
@@ -499,55 +508,90 @@ export default class FixedHeaderTable<T> extends React.Component<
                     this.props.showControlsAtTop &&
                     this.getControls()}
                 <Observer>
-                    {() => (
-                        <RVTable
-                            width={this.props.width!}
-                            height={this.props.height!}
-                            onScroll={this.props.onScroll}
-                            headerHeight={this.props.headerHeight!}
-                            rowHeight={this.props.rowHeight!}
-                            rowCount={
-                                this._store.dataStore.sortedFilteredData.length
-                            }
-                            rowGetter={this.rowGetter}
-                            rowClassName={this.rowClassName}
-                            onRowClick={
-                                this.props.onRowClick
-                                    ? (info: any) =>
-                                          this.props.onRowClick!(info.rowData)
-                                    : undefined
-                            }
-                            headerClassName={classNames(
-                                styles.headerColumn,
-                                this.props.headerClassName
-                            )}
-                            sort={this.sort}
-                            sortDirection={RVSDTtoStrType[this._sortDirection]}
-                            sortBy={this._sortBy}
-                        >
-                            {this.props.columns.map((column, index) => {
-                                return (
-                                    <RVColumn
-                                        key={column.name}
-                                        label={column.name}
-                                        dataKey={column.name}
-                                        width={Number(column.width)}
-                                        headerRenderer={
-                                            this.columnHeaders[index]
-                                        }
-                                        cellRenderer={(
-                                            props: TableCellProps
-                                        ) => {
-                                            return column.render(
-                                                props.rowData,
-                                                props.rowIndex
-                                            );
-                                        }}
-                                    />
-                                );
-                            })}
-                        </RVTable>
-                    )}
+                    {() => {
+                        // Rows render inside the virtualized grid, outside this
+                        // Observer; a new rowClassName is what repaints them.
+                        const data = this._store.dataStore.sortedFilteredData;
+                        const {
+                            transientRowClassName,
+                            isTransientRowInFocus,
+                        } = this.props;
+                        const transientClassNames = transientRowClassName
+                            ? data.map(row => transientRowClassName(row))
+                            : [];
+                        const focusedIndex = isTransientRowInFocus
+                            ? _.findIndex(data, row =>
+                                  isTransientRowInFocus(row)
+                              )
+                            : -1;
+                        return (
+                            <RVTable
+                                width={this.props.width!}
+                                height={this.props.height!}
+                                onScroll={this.props.onScroll}
+                                headerHeight={this.props.headerHeight!}
+                                rowHeight={this.props.rowHeight!}
+                                rowCount={
+                                    this._store.dataStore.sortedFilteredData
+                                        .length
+                                }
+                                rowGetter={this.rowGetter}
+                                rowClassName={
+                                    _.some(transientClassNames)
+                                        ? (info: { index: number }) =>
+                                              classnames(
+                                                  this.rowClassName(info),
+                                                  transientClassNames[
+                                                      info.index
+                                                  ]
+                                              )
+                                        : this.rowClassName
+                                }
+                                scrollToIndex={
+                                    focusedIndex >= 0 ? focusedIndex : undefined
+                                }
+                                onRowClick={
+                                    this.props.onRowClick
+                                        ? (info: any) =>
+                                              this.props.onRowClick!(
+                                                  info.rowData
+                                              )
+                                        : undefined
+                                }
+                                headerClassName={classNames(
+                                    styles.headerColumn,
+                                    this.props.headerClassName
+                                )}
+                                sort={this.sort}
+                                sortDirection={
+                                    RVSDTtoStrType[this._sortDirection]
+                                }
+                                sortBy={this._sortBy}
+                            >
+                                {this.props.columns.map((column, index) => {
+                                    return (
+                                        <RVColumn
+                                            key={column.name}
+                                            label={column.name}
+                                            dataKey={column.name}
+                                            width={Number(column.width)}
+                                            headerRenderer={
+                                                this.columnHeaders[index]
+                                            }
+                                            cellRenderer={(
+                                                props: TableCellProps
+                                            ) => {
+                                                return column.render(
+                                                    props.rowData,
+                                                    props.rowIndex
+                                                );
+                                            }}
+                                        />
+                                    );
+                                })}
+                            </RVTable>
+                        );
+                    }}
                 </Observer>
                 {!this.props.hideControls &&
                     !this.props.showControlsAtTop &&

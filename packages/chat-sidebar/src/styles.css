@@ -180,3 +180,72 @@ body,
 @custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
 
 @custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* Reply sections render as ordinary markdown. A comparison's quotes take the
+ * colours of their two sides, and the Suggested Next Step can be clicked. */
+[data-reply-section='analysis'] blockquote:has([data-entity-role='subject']) {
+    border-color: var(--role-subject);
+}
+
+[data-reply-section='analysis'] blockquote:has([data-entity-role='compare']) {
+    border-color: var(--role-compare);
+}
+
+[data-reply-section='next-step'] {
+    margin-inline: -8px;
+    padding: 2px 8px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.12s ease;
+}
+
+[data-reply-section='next-step']:hover,
+[data-reply-section='next-step']:focus-visible {
+    background: var(--muted);
+    outline: none;
+}
+
+/* A term's colour says what part it plays in the reply. The dashboard marks
+ * use the same colours (src/shared/components/chatSidebar/ChatSidebar.scss). */
+:root {
+    --role-subject: #2196f3;
+    --role-compare: #e91e63;
+    --role-filter: #00897b;
+    --role-context: #78909c;
+}
+
+.entity {
+    --entity-color: var(--role-context);
+}
+
+.entity[data-entity-role='subject'] {
+    --entity-color: var(--role-subject);
+}
+
+.entity[data-entity-role='compare'] {
+    --entity-color: var(--role-compare);
+}
+
+.entity[data-entity-role='filter'] {
+    --entity-color: var(--role-filter);
+}
+
+/* Terms linked to the dashboard. */
+.entity[data-linked='true'] {
+    border-bottom: 1px dotted var(--entity-color);
+    cursor: pointer;
+    outline: none;
+}
+
+.entity[data-linked='true']:hover,
+.entity[data-linked='true']:focus-visible {
+    background: color-mix(in srgb, var(--entity-color) 15%, transparent);
+}
+
+/* A clicked term, kept highlighted on the dashboard. */
+.entity[data-pinned='true'] {
+    border-bottom-style: solid;
+    border-bottom-width: 2px;
+    background: color-mix(in srgb, var(--entity-color) 22%, transparent);
+    font-weight: 600;
+}

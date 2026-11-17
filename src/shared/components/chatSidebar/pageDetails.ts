@@ -3,6 +3,8 @@
 
 import _ from 'lodash';
 import { StudyViewPageStore } from 'pages/studyView/StudyViewPageStore';
+import { StudyViewPageTabKeyEnum } from 'pages/studyView/StudyViewPageTabs';
+import { ChartTypeEnum } from 'pages/studyView/StudyViewConfig';
 import { ResultsViewPageStore } from 'pages/resultsView/ResultsViewPageStore';
 import { USER_SETTINGS_QUERY_PARAM } from 'pages/resultsView/ResultsViewURLWrapper';
 import GroupComparisonStore from 'pages/groupComparison/GroupComparisonStore';
@@ -29,6 +31,29 @@ interface StudyViewDetails {
     // Filters aren't repeated here — already in the auto-sent href
     // (getCurrentContextHref below) as #filterJson=...
     visibleCharts: StudyViewVisibleChart[];
+    // The numbers the dashboard's tables show. Frequencies are of the samples
+    // profiled for that gene, not of the whole cohort.
+    topMutatedGenes: StudyViewMutatedGene[];
+    categoricalCharts: StudyViewCategoricalChart[];
+    // Empty unless the Clinical Data tab is open.
+    clinicalDataColumns: string[];
+    // Genes picked in the query box or filtered on in a gene table.
+    selectedGenes: string[];
+    // Every other selection on the dashboard, one readable line each.
+    activeFilters: string[];
+}
+
+interface StudyViewMutatedGene {
+    gene: string;
+    mutatedSamples: number;
+    profiledSamples: number;
+    frequencyPercent: number;
+}
+
+interface StudyViewCategoricalChart {
+    uniqueKey: string;
+    displayName: string;
+    values: { value: string; count: number }[];
 }
 
 interface ResultsViewDetails {
@@ -86,6 +111,107 @@ export type PageDetails =
     | PatientViewDetails
     | UnavailableDetails;
 
+const MAX_MUTATED_GENES = 30;
+const MAX_CATEGORIES_PER_CHART = 12;
+
+function getTopMutatedGenes(store: StudyViewPageStore): StudyViewMutatedGene[] {
+    const rows = store.mutatedGeneTableRowData.result ?? [];
+    return _.take(
+        _.orderBy(
+            rows.filter(row => row.numberOfProfiledCases > 0),
+            row => row.numberOfAlteredCases / row.numberOfProfiledCases,
+            'desc'
+        ),
+        MAX_MUTATED_GENES
+    ).map(row => ({
+        gene: row.label,
+        mutatedSamples: row.numberOfAlteredCases,
+        profiledSamples: row.numberOfProfiledCases,
+        frequencyPercent: _.round(
+            (100 * row.numberOfAlteredCases) / row.numberOfProfiledCases,
+            1
+        ),
+    }));
+}
+
+function getCategoricalCharts(
+    store: StudyViewPageStore
+): StudyViewCategoricalChart[] {
+    return store.visibleAttributes
+        .filter(chart => {
+            const chartType = store.chartsType.get(chart.uniqueKey);
+            return (
+                chart.clinicalAttribute !== undefined &&
+                (chartType === ChartTypeEnum.TABLE ||
+                    chartType === ChartTypeEnum.PIE_CHART)
+            );
+        })
+        .map(chart => ({
+            uniqueKey: chart.uniqueKey,
+            displayName: chart.displayName,
+            values: _.take(
+                store.getClinicalDataCount(chart).result ?? [],
+                MAX_CATEGORIES_PER_CHART
+            ).map(({ value, count }) => ({ value, count })),
+        }));
+}
+
+function getClinicalDataColumns(store: StudyViewPageStore): string[] {
+    if (store.currentTab !== StudyViewPageTabKeyEnum.CLINICAL_DATA) return [];
+    return (store.clinicalAttributes.result ?? []).map(a => a.displayName);
+}
+
+function getSelectedGenes(store: StudyViewPageStore): string[] {
+    const filteredGenes = store.geneFilters.flatMap(filter =>
+        _.flattenDeep(filter.geneQueries).map(query => query.hugoGeneSymbol)
+    );
+    return _.uniq([...store.selectedGenes, ...filteredGenes]);
+}
+
+// Handled by getSelectedGenes or by the clinical labels below, or not a
+// selection the user made on a chart.
+const FILTERS_NOT_LISTED_AS_OTHER: readonly string[] = [
+    'studyIds',
+    'alterationFilter',
+    'geneFilters',
+    'clinicalDataFilters',
+];
+
+function isActiveFilter(value: unknown): boolean {
+    if (Array.isArray(value)) return value.length > 0;
+    const nested = (value as { filters?: unknown[] } | undefined)?.filters;
+    return !!nested && nested.length > 0;
+}
+
+function describeValue(value: {
+    value?: string;
+    start?: number;
+    end?: number;
+}): string {
+    return value.value ?? `${value.start ?? ''} to ${value.end ?? ''}`;
+}
+
+function getActiveFilters(store: StudyViewPageStore): string[] {
+    const filters = store.filters;
+    const attributes = _.keyBy(
+        store.clinicalAttributes.result ?? [],
+        a => a.clinicalAttributeId
+    );
+    const clinical = (filters.clinicalDataFilters ?? []).map(filter => {
+        const name =
+            attributes[filter.attributeId]?.displayName ?? filter.attributeId;
+        return `${name}: ${filter.values.map(describeValue).join(', ')}`;
+    });
+    const other = Object.entries(filters)
+        .filter(
+            ([key, value]) =>
+                !FILTERS_NOT_LISTED_AS_OTHER.includes(key) &&
+                isActiveFilter(value)
+        )
+        .map(([key, value]) => `${_.startCase(key)}: ${JSON.stringify(value)}`);
+    return [...clinical, ...other];
+}
+
 function getStudyViewDetails(store: StudyViewPageStore): StudyViewDetails {
     return {
         available: true,
@@ -99,6 +225,11 @@ function getStudyViewDetails(store: StudyViewPageStore): StudyViewDetails {
             displayName: c.displayName,
             dataType: c.dataType,
         })),
+        topMutatedGenes: getTopMutatedGenes(store),
+        categoricalCharts: getCategoricalCharts(store),
+        clinicalDataColumns: getClinicalDataColumns(store),
+        selectedGenes: getSelectedGenes(store),
+        activeFilters: getActiveFilters(store),
     };
 }
 

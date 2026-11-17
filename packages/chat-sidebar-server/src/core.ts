@@ -1,15 +1,21 @@
 // All configured providers are live; getModel() picks one per request.
 
 import {
+    APICallError,
     streamText,
     generateText,
     convertToModelMessages,
     Output,
     stepCountIs,
     tool,
+    getToolName,
+    isToolUIPart,
     CallSettings,
+    DynamicToolUIPart,
     LanguageModel,
+    TextUIPart,
     ToolSet,
+    ToolUIPart,
     UIMessage,
 } from 'ai';
 import { ServerResponse } from 'http';
@@ -36,11 +42,12 @@ const bedrock = createAmazonBedrock({
 
 const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID;
 
-// Follow-up suggestions always run on this small Bedrock model, whatever the
-// user picked for the chat itself.
+// Small models for follow-up suggestions, on the provider the chat uses.
 const SUGGESTIONS_MODEL_ID =
     process.env.SUGGESTIONS_MODEL_ID ||
     'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+const SMALL_ANTHROPIC_MODEL_ID = 'claude-haiku-4-5';
+const SMALL_VERTEX_MODEL_ID = 'claude-haiku-4-5@20251001';
 
 // Direct Anthropic and Vertex access currently use Sonnet 5.
 const CLAUDE_MODEL_ID = 'claude-sonnet-5';
@@ -85,8 +92,18 @@ const LOCAL_REPORT_PROMPT_TEXT = readFileSync(
     join(__dirname, 'reportPrompt.md'),
     'utf-8'
 );
+const SNAPSHOT_PROMPT_TEXT = readFileSync(
+    join(__dirname, 'snapshotPrompt.md'),
+    'utf-8'
+);
 const LOCAL_FOLLOWUPS_PROMPT_TEXT = readFileSync(
     join(__dirname, 'followupsPrompt.md'),
+    'utf-8'
+);
+// The sidebar's reply format. Appended after the system prompt wherever that
+// comes from, so it applies when the prompt is served from Langfuse too.
+const STRUCTURED_RESPONSE_PROMPT_TEXT = readFileSync(
+    join(__dirname, 'structuredResponsePrompt.md'),
     'utf-8'
 );
 // What the assistant can and can't do, so the follow-ups suggest only what it
@@ -114,9 +131,10 @@ async function getSystemPrompt(pageHref?: string): Promise<string> {
               })
           ).prompt
         : LOCAL_SYSTEM_PROMPT_TEXT;
+    const prompt = `${systemPrompt}\n\n${STRUCTURED_RESPONSE_PROMPT_TEXT}`;
     return pageHref
-        ? `${systemPrompt}\n\nThe user is currently viewing this cBioPortal page: ${pageHref}`
-        : systemPrompt;
+        ? `${prompt}\n\nThe user is currently viewing this cBioPortal page: ${pageHref}`
+        : prompt;
 }
 
 async function getReportPrompt(): Promise<string> {
@@ -340,18 +358,114 @@ export async function runChat(
     await result.pipeUIMessageStreamToResponse(res);
 }
 
-// No tools — everything the report needs (query results, page-state
-// snapshots, navigation URLs) is already in the given history.
-export async function runReport(
+// For one-shot calls. The Bedrock provider drops `reasoning: 'none'`, so Claude
+// there gets the raw field.
+function noThinking(modelId: string) {
+    return {
+        reasoning: 'none' as const,
+        providerOptions: modelId.includes('anthropic.')
+            ? {
+                  bedrock: {
+                      additionalModelRequestFields: {
+                          thinking: { type: 'disabled' },
+                      },
+                  },
+              }
+            : undefined,
+    };
+}
+
+// Keeps one oversized result from crowding out the rest of the session.
+const MAX_TOOL_RESULT_CHARS = 20_000;
+
+function formatToolResult(output: unknown): string {
+    // MCP results wrap their payload in text content items.
+    const content = (output as { content?: unknown } | null)?.content;
+    const text = Array.isArray(content)
+        ? content
+              .map(item =>
+                  item?.type === 'text' ? item.text : `[${item?.type} content]`
+              )
+              .join('\n')
+        : JSON.stringify(output) ?? String(output);
+    return text.length > MAX_TOOL_RESULT_CHARS
+        ? `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n[truncated ${text.length -
+              MAX_TOOL_RESULT_CHARS} characters]`
+        : text;
+}
+
+// Tool calls go in as text: Bedrock strips tool content from a request that
+// offers no tools, which would hide every query result from the report.
+function toolPartAsText(part: ToolUIPart | DynamicToolUIPart): TextUIPart {
+    const result =
+        part.state === 'output-available'
+            ? formatToolResult(part.output)
+            : part.state === 'output-error'
+            ? `Error: ${part.errorText}`
+            : 'No result.';
+    return {
+        type: 'text',
+        text: `[Tool call: ${getToolName(part)}]\nInput: ${JSON.stringify(
+            part.input
+        )}\nResult:\n${result}`,
+    };
+}
+
+// Numbers each distinct screenshot in order of appearance so the report can
+// place it with screenshot:N. The client numbers them the same way.
+function labelScreenshots(uiMessages: UIMessage[]): UIMessage[] {
+    const numbers = new Map<string, number>();
+    return uiMessages.map(message => ({
+        ...message,
+        parts: message.parts.flatMap(part => {
+            if (part.type !== 'file' || !part.mediaType.startsWith('image/')) {
+                return [part];
+            }
+            if (!numbers.has(part.url)) numbers.set(part.url, numbers.size + 1);
+            const label: TextUIPart = {
+                type: 'text',
+                text: `[Screenshot ${numbers.get(part.url)}]`,
+            };
+            return [label, part];
+        }),
+    }));
+}
+
+// No tools offered — everything the report needs (query results, page-state
+// snapshots, navigation URLs) is already in the given history. Yields the
+// report's text as it is written.
+export interface SnapshotRequest {
+    // Titles of the findings the user picked, in session order.
+    findings: string[];
+    frequencyChart: boolean;
+    comparisonTable: boolean;
+}
+
+function snapshotTrigger(snapshot: SnapshotRequest): string {
+    const charts = [
+        snapshot.frequencyChart && 'the frequency chart',
+        snapshot.comparisonTable && 'the comparison table',
+    ].filter(Boolean);
+    return `Write the Exploration Snapshot now. Findings, one section each: ${snapshot.findings
+        .map((f, i) => `${i + 1}. ${f}`)
+        .join('; ')}. Charts: ${
+        charts.length > 0 ? charts.join(' and ') : 'none'
+    }.`;
+}
+
+// With a snapshot, the history holds only the picked findings' exchanges and
+// the result is a short summary of them rather than a full report.
+export async function* runReport(
     uiMessages: UIMessage[],
     abortSignal: AbortSignal,
-    model?: string
-): Promise<string> {
+    model?: string,
+    snapshot?: SnapshotRequest
+): AsyncGenerator<string> {
     const modelId = model || AVAILABLE_MODELS[0]?.id;
     if (!modelId) {
         throw new Error('No model available — see AVAILABLE_MODELS.');
     }
-    const system = await getReportPrompt();
+    const system = snapshot ? SNAPSHOT_PROMPT_TEXT : await getReportPrompt();
     // Claude rejects a request whose messages end on 'assistant' (treats it
     // as an unsupported prefill) — the session's history ends there whenever
     // the last turn was a reply, so append an explicit trigger turn.
@@ -361,27 +475,42 @@ export async function runReport(
     // differ from the original response, and the Bedrock provider drops
     // reasoning parts that carry no signature.
     const messages = await convertToModelMessages(
-        uiMessages
+        labelScreenshots(uiMessages)
             .map(message => ({
                 ...message,
-                parts: message.parts.filter(part => part.type !== 'reasoning'),
+                parts: message.parts
+                    .filter(part => part.type !== 'reasoning')
+                    .map(part =>
+                        isToolUIPart(part) ? toolPartAsText(part) : part
+                    ),
             }))
             .filter(message => message.parts.length > 0),
         { ignoreIncompleteToolCalls: true }
     );
-    const { text } = await generateText({
+    // streamText reports failures here rather than throwing.
+    let error: unknown;
+    const result = streamText({
         model: getModel(modelId),
         system,
+        ...noThinking(modelId),
         messages: [
             ...messages,
             {
                 role: 'user',
-                content: 'Compile the research report for this session now.',
+                content: snapshot
+                    ? snapshotTrigger(snapshot)
+                    : 'Compile the research report for this session now.',
             },
         ],
         abortSignal,
+        onError: event => {
+            error = event.error;
+        },
     });
-    return text;
+    for await (const chunk of result.textStream) {
+        yield chunk;
+    }
+    if (error !== undefined) throw error;
 }
 
 // Titles come from the opening question alone — enough for a few words, and it
@@ -403,6 +532,7 @@ export async function runTitle(
     const { text: title } = await generateText({
         model: getModel(modelId),
         system: TITLE_PROMPT,
+        ...noThinking(modelId),
         messages: [{ role: 'user', content: text }],
         abortSignal,
     });
@@ -431,28 +561,45 @@ export interface FollowupsInput {
     details: unknown;
 }
 
-// Follow-ups for the latest exchange on the page the user is on, yielded one
-// at a time as each is complete. No tools, no reasoning, and only the
-// exchange the client sends, so the call stays fast and cheap.
-export async function* runFollowups(
-    { question, answer, href, details }: FollowupsInput,
+function getSmallModel(provider: string): LanguageModel {
+    switch (provider) {
+        case 'anthropic':
+            return anthropic(SMALL_ANTHROPIC_MODEL_ID);
+        case 'vertex':
+            return vertexAnthropic(SMALL_VERTEX_MODEL_ID);
+        case 'bedrock':
+            return bedrock(SUGGESTIONS_MODEL_ID);
+        default:
+            throw new Error(`Unknown provider: "${provider}"`);
+    }
+}
+
+// Providers whose small model isn't enabled; their follow-ups use the chat
+// model instead.
+const smallModelUnavailable = new Set<string>();
+
+function isModelUnavailable(err: unknown): boolean {
+    return (
+        APICallError.isInstance(err) &&
+        (err.statusCode === 403 || err.statusCode === 404)
+    );
+}
+
+async function* streamSuggestions(
+    settings: Pick<
+        Parameters<typeof streamText>[0],
+        'model' | 'reasoning' | 'providerOptions'
+    >,
+    system: string,
+    content: string,
     abortSignal: AbortSignal
 ): AsyncGenerator<Suggestion> {
-    const system = `${LOCAL_FOLLOWUPS_PROMPT_TEXT}\n\n${CAPABILITIES_PROMPT_TEXT}\n\n${formatPageSection(
-        href,
-        details
-    )}`;
     // streamText reports failures here rather than throwing.
     let error: unknown;
     const result = streamText({
-        model: bedrock(SUGGESTIONS_MODEL_ID),
+        ...settings,
         system,
-        messages: [
-            {
-                role: 'user',
-                content: `## Latest exchange\n\nUser:\n${question}\n\nAssistant:\n${answer}\n\nSuggest follow-ups.`,
-            },
-        ],
+        messages: [{ role: 'user', content }],
         output: Output.array({ element: SuggestionSchema }),
         abortSignal,
         onError: event => {
@@ -465,4 +612,55 @@ export async function* runFollowups(
         if (++count === FOLLOWUP_COUNT) return;
     }
     if (error !== undefined) throw error;
+}
+
+// Follow-ups for the latest exchange on the page the user is on, yielded one
+// at a time as each is complete. No tools, no reasoning, and only the
+// exchange the client sends, so the call stays fast and cheap.
+export async function* runFollowups(
+    { question, answer, href, details }: FollowupsInput,
+    abortSignal: AbortSignal,
+    model?: string
+): AsyncGenerator<Suggestion> {
+    const modelId = model || AVAILABLE_MODELS[0]?.id;
+    if (!modelId) {
+        throw new Error('No model available — see AVAILABLE_MODELS.');
+    }
+    const provider = modelId.slice(0, modelId.indexOf(':'));
+    const system = `${LOCAL_FOLLOWUPS_PROMPT_TEXT}\n\n${CAPABILITIES_PROMPT_TEXT}\n\n${formatPageSection(
+        href,
+        details
+    )}`;
+    const content = `## Latest exchange\n\nUser:\n${question}\n\nAssistant:\n${answer}\n\nSuggest follow-ups.`;
+    const chatModel = () =>
+        streamSuggestions(
+            { model: getModel(modelId), ...noThinking(modelId) },
+            system,
+            content,
+            abortSignal
+        );
+    if (smallModelUnavailable.has(provider)) {
+        yield* chatModel();
+        return;
+    }
+    let yielded = false;
+    try {
+        for await (const suggestion of streamSuggestions(
+            { model: getSmallModel(provider) },
+            system,
+            content,
+            abortSignal
+        )) {
+            yielded = true;
+            yield suggestion;
+        }
+    } catch (err) {
+        if (yielded || !isModelUnavailable(err)) throw err;
+        console.warn(
+            `${provider} small model unavailable, using ${modelId} for follow-ups:`,
+            describeError(err)
+        );
+        smallModelUnavailable.add(provider);
+        yield* chatModel();
+    }
 }

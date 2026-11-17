@@ -39,6 +39,10 @@ import {
 } from 'cbioportal-frontend-commons';
 import ifNotDefined from 'shared/lib/ifNotDefined';
 import { TableHeaderCellFilterIcon } from 'pages/studyView/table/TableHeaderCellFilterIcon';
+import {
+    getGeneRowHighlightClassName,
+    isGeneRowHovered,
+} from 'shared/components/chatSidebar/highlightStore';
 
 export type MultiSelectionTableRow = OncokbCancerGene & {
     label: string;
@@ -950,6 +954,16 @@ export class MultiSelectionTable extends React.Component<
                         afterSorting={this.afterSorting}
                         fixedTopRowsData={this.preSelectedRows}
                         highlightedRowClassName={this.selectedRowClassName}
+                        transientRowClassName={
+                            this.props.tableType === FreqColumnTypeEnum.MUTATION
+                                ? row => getGeneRowHighlightClassName(row.label)
+                                : undefined
+                        }
+                        isTransientRowInFocus={
+                            this.props.tableType === FreqColumnTypeEnum.MUTATION
+                                ? row => isGeneRowHovered(row.label)
+                                : undefined
+                        }
                         showSetOperationsButton={true}
                         setOperationsButtonText={
                             this.props.setOperationsButtonText

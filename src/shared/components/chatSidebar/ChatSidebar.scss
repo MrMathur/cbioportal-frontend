@@ -30,6 +30,17 @@
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
 }
 
+#reactRoot {
+    padding-right: var(--chat-sidebar-reserved-width, 0);
+}
+
+/* Fixed page widths would run under the panel; the panel's own maximum width
+ * is what keeps the page usable. */
+#reactRoot .contentWidth {
+    min-width: 0;
+    max-width: 100%;
+}
+
 .chat-sidebar-panel {
     position: fixed;
     top: 0;
@@ -136,4 +147,83 @@ body.chat-sidebar-resizing .chat-sidebar-iframe {
     width: 100%;
     height: 100%;
     border: 0;
+}
+
+/* Marks left on the dashboard by the terms pointed at in the sidebar. The
+ * colour is the term's role in the reply and matches the sidebar's own
+ * (packages/chat-sidebar/src/styles.css). */
+.chat-highlight-subject,
+[data-chat-highlight='subject'] {
+    --chat-highlight-color: #2196f3;
+}
+
+.chat-highlight-compare,
+[data-chat-highlight='compare'] {
+    --chat-highlight-color: #e91e63;
+}
+
+.chat-highlight-filter,
+[data-chat-highlight='filter'] {
+    --chat-highlight-color: #00897b;
+}
+
+.chat-highlight-context,
+[data-chat-highlight='context'] {
+    --chat-highlight-color: #78909c;
+}
+
+[data-chat-highlight] {
+    position: relative;
+}
+
+[data-chat-highlight]::after,
+.chat-highlight-column {
+    border: 2px solid var(--chat-highlight-color);
+    border-radius: 4px;
+    background: color-mix(
+        in srgb,
+        var(--chat-highlight-color) 30%,
+        transparent
+    );
+    pointer-events: none;
+}
+
+[data-chat-highlight]::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+}
+
+.chat-highlight-column {
+    position: fixed;
+    z-index: 9999;
+}
+
+.chat-highlight-row {
+    background: color-mix(
+        in srgb,
+        var(--chat-highlight-color) 30%,
+        #fff
+    ) !important;
+    box-shadow: inset 0 0 0 2px var(--chat-highlight-color);
+}
+
+/* A clicked term's mark, lighter than the hovered term's so that several can
+ * stay on screen together. */
+[data-chat-highlight][data-chat-highlight-pinned]::after,
+.chat-highlight-column.chat-highlight-pinned {
+    background: color-mix(
+        in srgb,
+        var(--chat-highlight-color) 18%,
+        transparent
+    );
+}
+
+.chat-highlight-row.chat-highlight-pinned {
+    background: color-mix(
+        in srgb,
+        var(--chat-highlight-color) 20%,
+        #fff
+    ) !important;
 }

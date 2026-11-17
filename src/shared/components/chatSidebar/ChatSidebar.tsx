@@ -2,7 +2,15 @@ import * as React from 'react';
 import { observer } from 'mobx-react';
 import { observable, makeObservable, action } from 'mobx';
 import { getLoadConfig } from 'config/config';
+import WindowStore from 'shared/components/window/WindowStore';
 import { getChatServerBase, getChatOrigin } from './chatServerBase';
+import ChatColumnHighlight from './ChatColumnHighlight';
+import {
+    getChatHighlight,
+    scrollChatHighlightIntoView,
+    setChatHighlight,
+    setPinnedChatHighlights,
+} from './highlightStore';
 import { goToPage, normalizeBasePath } from './navigateTool';
 import { PortalWebMcp } from './portalWebMcp';
 import { PageEvent, PageEventPublisher } from './pageEvents';
@@ -12,8 +20,10 @@ import {
     waitForViewReady,
 } from './screenshot';
 import {
+    CHAT_SIDEBAR_RAIL_WIDTH,
     clampChatSidebarWidth,
     DEFAULT_CHAT_SIDEBAR_WIDTH,
+    getMaximumChatSidebarWidth,
     MIN_CHAT_SIDEBAR_WIDTH,
     readStoredChatSidebarWidth,
 } from './chatSidebarWidth';
@@ -26,6 +36,7 @@ type ChatSidebarMode = 'expanded' | 'rail' | 'hidden';
 const MODE_STORAGE_KEY = 'chat-sidebar:mode';
 const WIDTH_STORAGE_KEY = 'chat-sidebar:width';
 const KEYBOARD_RESIZE_STEP = 20;
+const RESERVED_WIDTH_CSS_VARIABLE = '--chat-sidebar-reserved-width';
 
 function isChatSidebarMode(v: unknown): v is ChatSidebarMode {
     return v === 'expanded' || v === 'rail' || v === 'hidden';
@@ -64,7 +75,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
     private resizeStartWidth = DEFAULT_CHAT_SIDEBAR_WIDTH;
 
     private get maximumWidth() {
-        return window.innerWidth;
+        return getMaximumChatSidebarWidth(window.innerWidth);
     }
 
     private get minimumWidth() {
@@ -73,6 +84,28 @@ export default class ChatSidebar extends React.Component<{}, {}> {
 
     private clampWidth(width: number) {
         return clampChatSidebarWidth(width, this.maximumWidth);
+    }
+
+    private get reservedPageWidth() {
+        switch (this.mode) {
+            case 'expanded':
+                return this.width;
+            case 'rail':
+                return CHAT_SIDEBAR_RAIL_WIDTH;
+            case 'hidden':
+                return 0;
+        }
+    }
+
+    // The page lays out beside the panel: the CSS variable pads the page, and
+    // WindowStore narrows everything that sizes itself from the window.
+    // Left alone during a drag, so charts re-lay out once, when it ends.
+    private reservePageSpace(width = this.reservedPageWidth) {
+        document.documentElement.style.setProperty(
+            RESERVED_WIDTH_CSS_VARIABLE,
+            `${width}px`
+        );
+        WindowStore.setReservedWidth(width);
     }
 
     private storeWidth() {
@@ -89,6 +122,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         this.resizing = false;
         document.body.classList.remove('chat-sidebar-resizing');
         this.storeWidth();
+        this.reservePageSpace();
     }
 
     @action.bound
@@ -101,6 +135,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         } catch {
             /* ignore */
         }
+        this.reservePageSpace();
         this.sendOpenState();
     }
 
@@ -112,6 +147,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
     componentDidMount() {
         window.addEventListener('message', this.onMessage);
         window.addEventListener('resize', this.onWindowResize);
+        document.addEventListener('mousemove', this.onPageMouseMove);
         this.onWindowResize();
         // Also registers go_to_page as a native WebMCP tool where supported;
         // no-op otherwise.
@@ -121,14 +157,19 @@ export default class ChatSidebar extends React.Component<{}, {}> {
     componentWillUnmount() {
         window.removeEventListener('message', this.onMessage);
         window.removeEventListener('resize', this.onWindowResize);
+        document.removeEventListener('mousemove', this.onPageMouseMove);
         document.body.classList.remove('chat-sidebar-resizing');
+        this.reservePageSpace(0);
         this.webMcp.stop();
         this.pageEvents.stop();
+        setChatHighlight(undefined);
+        setPinnedChatHighlights([]);
     }
 
     @action.bound
     onWindowResize() {
         this.width = this.clampWidth(this.width);
+        if (!this.resizing) this.reservePageSpace();
     }
 
     @action.bound
@@ -187,6 +228,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         e.preventDefault();
         this.width = this.clampWidth(nextWidth);
         this.storeWidth();
+        this.reservePageSpace();
     }
 
     // The iframe posts a portal path here since it can't call routingStore
@@ -214,6 +256,12 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         );
     }
 
+    // Moves over the iframe don't reach this document, so one here means the
+    // pointer has left the sidebar, which the iframe doesn't always hear about.
+    onPageMouseMove = () => {
+        if (getChatHighlight()) setChatHighlight(undefined);
+    };
+
     onMessage = (e: MessageEvent) => {
         if (e.source !== this.iframeRef.current?.contentWindow) return;
         if (e.origin !== getChatOrigin()) return;
@@ -222,6 +270,15 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         if (e.data?.type === 'chat-sidebar:ready') {
             this.sendOpenState();
             this.pageEvents.start(this.sendPageEvent);
+            return;
+        }
+        if (e.data?.type === 'chat-sidebar:highlight') {
+            setChatHighlight(e.data.entity);
+            scrollChatHighlightIntoView();
+            return;
+        }
+        if (e.data?.type === 'chat-sidebar:pinHighlights') {
+            setPinnedChatHighlights(e.data.entities);
             return;
         }
         if (e.data?.type === 'chat-sidebar:navigate') {
@@ -282,6 +339,7 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         if (this.resizing) panelClassName += ' chat-sidebar-panel-resizing';
         return (
             <>
+                <ChatColumnHighlight />
                 {this.mode === 'hidden' && (
                     <button
                         type="button"

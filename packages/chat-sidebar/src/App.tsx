@@ -15,6 +15,9 @@ import {
 import { Thread } from '@/components/assistant-ui/elements/thread.aui';
 import { ToolFallback } from '@/components/assistant-ui/elements/tool-fallback.aui';
 import { ChatHeader } from '@/components/ChatHeader';
+import { DashboardTriggers } from '@/components/DashboardTriggers';
+import { PinnedHighlights } from '@/components/PinnedHighlights';
+import { SessionTrail } from '@/components/SessionTrail';
 import { SidebarRail } from '@/components/SidebarRail';
 import { useCrossTabSync } from '@/hooks/use-cross-tab-sync';
 import {
@@ -27,6 +30,7 @@ import {
     subscribe,
 } from '@/lib/chatSession';
 import { setPortalLinkAliases } from '@/lib/portal-link';
+import { clearHighlightWhenPointerLeaves } from '@/lib/highlight';
 import { getSidebarMode, subscribeToSidebarMode } from '@/lib/sidebar-mode';
 import { threadListAdapter } from '@/lib/threadListAdapter';
 import { readLastThreadId, saveLastThreadId } from '@/lib/threadStorage';
@@ -124,6 +128,8 @@ export function App() {
             });
     }, []);
 
+    useEffect(clearHighlightWhenPointerLeaves, []);
+
     useEffect(() => {
         let cancelled = false;
         fetch('/api/chat/models')
@@ -201,6 +207,9 @@ export function App() {
                     ) : (
                         <>
                             <ChatHeader models={models} />
+                            <SessionTrail />
+                            <DashboardTriggers />
+                            <PinnedHighlights />
                             <div className="min-h-0 flex-1">
                                 <Thread components={THREAD_COMPONENTS} />
                             </div>

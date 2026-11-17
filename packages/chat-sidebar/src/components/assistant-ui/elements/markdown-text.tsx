@@ -8,6 +8,7 @@ import {
     unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
     useIsMarkdownCodeBlock,
 } from '@assistant-ui/react-markdown';
+import { ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
     ComponentPropsWithoutRef,
@@ -19,7 +20,7 @@ import {
     useRef,
     useState,
 } from 'react';
-import { TextMessagePartProps } from '@assistant-ui/react';
+import { TextMessagePartProps, useAui } from '@assistant-ui/react';
 import { CheckIcon, CopyIcon, DownloadIcon, TerminalIcon } from 'lucide-react';
 
 import { TooltipIconButton } from '@/components/assistant-ui/elements/tooltip-icon-button';
@@ -37,7 +38,10 @@ import {
 } from '@/components/ui/tooltip';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { cn } from '@/lib/utils';
+import { EntityLink } from '@/components/EntityLink';
+import { parseEntityHref } from '@/lib/entities';
 import { notifyNavigate, resolvePortalLink } from '@/lib/portal-link';
+import { remarkReplySections } from '@/lib/replySections';
 import {
     hasInlineScriptMetadata,
     metaFromNode,
@@ -101,7 +105,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components }) => {
 
     return (
         <MarkdownTextPrimitive
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkReplySections]}
             className="aui-md"
             components={markdownComponents}
             defer
@@ -377,6 +381,8 @@ const memoizedComponents = memoizeMarkdownComponents({
         />
     ),
     a: ({ className, href, children, ...props }) => {
+        const entity = parseEntityHref(href);
+        if (entity) return <EntityLink entity={entity}>{children}</EntityLink>;
         const portalLink = resolvePortalLink(href);
         const path = portalLink?.path;
         if (path) {
@@ -534,10 +540,44 @@ const memoizedComponents = memoizeMarkdownComponents({
     },
 });
 
+// The Suggested Next Step is a button: clicking it sends the suggestion as the
+// user's next message.
+const ReplySection: FC<ComponentPropsWithoutRef<'section'> & ExtraProps> = ({
+    node: _node,
+    ...props
+}) => {
+    const aui = useAui();
+    if (props['data-reply-section' as keyof typeof props] !== 'next-step') {
+        return <section {...props} />;
+    }
+    const send = (section: HTMLElement) => {
+        if (aui.thread().getState().isRunning) return;
+        const suggestion = Array.from(section.children)
+            .filter(child => child.tagName !== 'H2')
+            .map(child => child.textContent)
+            .join(' ')
+            .trim();
+        if (suggestion) aui.thread().append(suggestion);
+    };
+    return (
+        <section
+            {...props}
+            role="button"
+            tabIndex={0}
+            title="Do this next"
+            onClick={e => send(e.currentTarget)}
+            onKeyDown={e => {
+                if (e.key === 'Enter') send(e.currentTarget);
+            }}
+        />
+    );
+};
+
 // CodeHeader is merged in after memoization rather than through it:
 // memoizeMarkdownComponents strips `node` from every component it wraps, and a
 // fence's info string — where a named filename lives — is only on node.data.meta.
 const defaultComponents = {
     ...memoizedComponents,
     CodeHeader,
+    section: ReplySection,
 };

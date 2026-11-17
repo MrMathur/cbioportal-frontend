@@ -13,6 +13,7 @@ export default class WindowWrapper {
 
     private handleWindowResize: () => void;
     private windowObj: any;
+    private reservedWidth = 0;
 
     constructor() {
         makeObservable(this);
@@ -29,9 +30,18 @@ export default class WindowWrapper {
     @action.bound
     private setWindowSize() {
         this.size = {
-            width: this.windowObj.innerWidth,
+            width: Math.max(0, this.windowObj.innerWidth - this.reservedWidth),
             height: this.windowObj.innerHeight,
         };
+    }
+
+    /**
+     * Takes width off `size` for a panel docked at the window's edge, so
+     * everything sized from the window fits the space that is left.
+     */
+    public setReservedWidth(width: number) {
+        this.reservedWidth = width;
+        this.setWindowSize();
     }
 
     @autobind

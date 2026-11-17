@@ -48,6 +48,19 @@ export function getPageType(): PageType | undefined {
     return pageType;
 }
 
+const settledPageListeners = new Set<() => void>();
+
+export function subscribeToSettledPage(listener: () => void): () => void {
+    settledPageListeners.add(listener);
+    return () => {
+        settledPageListeners.delete(listener);
+    };
+}
+
+export function getSettledPageDetails(): Record<string, unknown> | undefined {
+    return latest.settledSnapshot?.details;
+}
+
 // A pending snapshot without details keeps the previous page type: Study View
 // reports no details until its study ids resolve, which would otherwise flash
 // the no-page state.
@@ -84,6 +97,7 @@ export function listenForPageEvents(): void {
         if (!event.pending) {
             latest.settledSnapshot = event;
             setSettledSnapshot(event);
+            for (const listener of settledPageListeners) listener();
         }
         updatePageType(event);
         setFollowupsPage(event);

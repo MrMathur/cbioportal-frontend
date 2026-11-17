@@ -6,7 +6,6 @@ import {
 } from '@/components/assistant-ui/elements/attachment.aui';
 import { ScreenshotButton } from '@/components/assistant-ui/elements/screenshot-button';
 import { File } from '@/components/assistant-ui/elements/file';
-import { ThreadFollowupSuggestions } from '@/components/assistant-ui/elements/follow-up-suggestions.aui';
 import { MarkdownText } from '@/components/assistant-ui/elements/markdown-text';
 import { ToolFallback } from '@/components/assistant-ui/elements/tool-fallback.aui';
 import {
@@ -15,9 +14,16 @@ import {
     ToolGroupTrigger,
 } from '@/components/assistant-ui/elements/tool-group.aui';
 import { TooltipIconButton } from '@/components/assistant-ui/elements/tooltip-icon-button';
+import { PendingChangesBar } from '@/components/DashboardTriggers';
+import { PinnedTermsBar } from '@/components/PinnedHighlights';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getPageType, PageType, subscribe } from '@/lib/page-events';
+import {
+    ActionTrigger,
+    messageText,
+    parseDashboardMessage,
+} from '@/lib/sessionSteps';
 import { getStartersState, subscribeToStarters } from '@/lib/starters';
 import { cn } from '@/lib/utils';
 import {
@@ -207,16 +213,77 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
     );
 };
 
+const DashboardActionBanner: FC<{
+    trigger: Exclude<ActionTrigger, 'auto'>;
+    label: string;
+}> = ({ trigger, label }) => (
+    <div className="rounded-sm bg-accent px-3 py-2 text-[13px] text-primary">
+        {trigger === 'click' && (
+            <>
+                <span aria-hidden>👆</span> You selected <b>{label}</b> on the
+                dashboard
+            </>
+        )}
+        {trigger === 'clear' && (
+            <>
+                <span aria-hidden>↩️</span> You removed <b>{label}</b> from your
+                selection
+            </>
+        )}
+        {trigger === 'term' && (
+            <>
+                <span aria-hidden>🔎</span> You clicked <b>{label}</b>
+            </>
+        )}
+        {trigger === 'tab' && (
+            <>
+                <span aria-hidden>📊</span> You navigated to <b>{label}</b>
+            </>
+        )}
+        {trigger === 'review' && (
+            <>
+                <span aria-hidden>🔍</span> You asked about your dashboard
+                changes: <b>{label}</b>
+            </>
+        )}
+    </div>
+);
+
 const ThreadMessage: FC = () => {
     const {
         AssistantMessage: AssistantMessageComponent = AssistantMessage,
     } = useContext(ThreadComponentsContext);
     const role = useAuiState(s => s.message.role);
     const isEditing = useAuiState(s => s.message.composer.isEditing);
+    const index = useAuiState(s => s.message.index);
+    const dashboardAction = useAuiState(s =>
+        s.message.role === 'user'
+            ? parseDashboardMessage(messageText(s.message))?.trigger
+            : undefined
+    );
+    const dashboardLabel = useAuiState(s =>
+        s.message.role === 'user'
+            ? parseDashboardMessage(messageText(s.message))?.label
+            : undefined
+    );
 
-    if (isEditing) return <EditComposer />;
-    if (role === 'user') return <UserMessage />;
-    return <AssistantMessageComponent />;
+    // The session trail scrolls to a step by its message index.
+    return (
+        <div data-message-index={index} className="contents">
+            {dashboardAction === 'auto' ? null : dashboardAction ? (
+                <DashboardActionBanner
+                    trigger={dashboardAction}
+                    label={dashboardLabel!}
+                />
+            ) : isEditing ? (
+                <EditComposer />
+            ) : role === 'user' ? (
+                <UserMessage />
+            ) : (
+                <AssistantMessageComponent />
+            )}
+        </div>
+    );
 };
 
 const ThreadScrollToBottom: FC = () => {
@@ -372,9 +439,8 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
             <AuiIf condition={isNewChatView}>
                 <ComposerSuggestions inputRef={inputRef} />
             </AuiIf>
-            <ThreadFollowupSuggestions
-                onSelect={() => focusInputAtEnd(inputRef)}
-            />
+            <PendingChangesBar />
+            <PinnedTermsBar />
             <div
                 data-slot="aui_composer-shell"
                 className="border-border focus-within:border-muted-foreground/40 dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) transition-[border-color]"
@@ -385,7 +451,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
                     placeholder={
                         showsSuggestions
                             ? 'Or ask your own question…'
-                            : 'Ask anything about cBioPortal…'
+                            : 'Ask about this study...'
                     }
                     className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
                     rows={1}

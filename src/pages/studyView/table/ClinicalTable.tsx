@@ -18,6 +18,10 @@ import { SortDirection } from '../../../shared/components/lazyMobXTable/LazyMobX
 import { EllipsisTextTooltip } from 'cbioportal-frontend-commons';
 import { DEFAULT_SORTING_COLUMN } from '../StudyViewConfig';
 import ComparisonVsIcon from 'shared/components/ComparisonVsIcon';
+import {
+    getCategoryRowHighlightClassName,
+    isCategoryRowHovered,
+} from 'shared/components/chatSidebar/highlightStore';
 
 export interface IClinicalTableProps {
     data: ClinicalDataCountSummary[];
@@ -32,6 +36,7 @@ export interface IClinicalTableProps {
     height?: number;
     showAddRemoveAllButtons?: boolean;
     title?: string;
+    chartKey?: string;
 }
 
 class ClinicalTableComponent extends FixedHeaderTable<
@@ -347,6 +352,15 @@ export default class ClinicalTable extends React.Component<
     render() {
         return (
             <ClinicalTableComponent
+                transientRowClassName={row =>
+                    getCategoryRowHighlightClassName(
+                        this.props.chartKey,
+                        row.value
+                    )
+                }
+                isTransientRowInFocus={row =>
+                    isCategoryRowHovered(this.props.chartKey, row.value)
+                }
                 width={this.props.width}
                 height={this.props.height}
                 data={this.props.data || []}

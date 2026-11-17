@@ -86,6 +86,7 @@ import {
     StructVarMultiSelectionTableColumnKey,
 } from 'pages/studyView/table/StructuralVariantMultiSelectionTable';
 import { StructVarGenePair } from 'pages/studyView/StructVarUtils';
+import { getChartHighlightProps } from 'shared/components/chatSidebar/highlightStore';
 import { Modal } from 'react-bootstrap';
 import { GenericAssayDataType } from 'shared/lib/GenericAssayUtils/GenericAssayCommonUtils';
 
@@ -631,6 +632,7 @@ export class ChartContainer extends React.Component<IChartContainerProps, {}> {
                 return () => (
                     <>
                         <ClinicalTable
+                            chartKey={this.props.chartMeta.uniqueKey}
                             data={this.props.promise.result}
                             width={getWidthByDimension(
                                 this.props.dimension,
@@ -1711,6 +1713,10 @@ export class ChartContainer extends React.Component<IChartContainerProps, {}> {
                         [styles.highlight]: this.highlightChart,
                     })}
                     data-test={`chart-container-${this.props.chartMeta.uniqueKey}`}
+                    {...getChartHighlightProps(
+                        this.props.chartMeta.uniqueKey,
+                        this.chartType === ChartTypeEnum.TABLE
+                    )}
                     onMouseEnter={this.handlers.onMouseEnterChart}
                     onMouseLeave={this.handlers.onMouseLeaveChart}
                 >
