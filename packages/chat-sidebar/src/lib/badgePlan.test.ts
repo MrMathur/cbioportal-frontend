@@ -168,6 +168,15 @@ test('checkText matches every mark once, at a sentence start', () => {
     assert.deepEqual(misplaced.misplaced, ['[[2]]']);
     const unknown = checkText('[[1]] A. [[2]] B. [[next]] C. [[3]] D.', plan);
     assert.deepEqual(unknown.unknown, ['[[3]]']);
+    // A repeated or mid-sentence token is logged but still links.
+    const repeated = checkText(
+        '[[1]] A. [[2]] B. [[next]] C. I would pick [[1]].',
+        plan
+    );
+    assert.equal(repeated.ok, false);
+    assert.deepEqual(repeated.duplicated, ['[[1]]']);
+    assert.equal(repeated.linkable, true);
+    assert.equal(checkText('No tokens at all.', plan).linkable, false);
 });
 
 test('tokens become chip links, or are stripped', () => {
@@ -224,5 +233,46 @@ test('contextTooltip describes the cohort from the slots', () => {
     assert.equal(
         contextTooltip(slots),
         'Lung adenocarcinoma, MSK-CHORD (MSK, Nature 2024), Sex: Female'
+    );
+});
+
+test('a context or next-step marker inside a sentence still links', () => {
+    const { plan } = buildPlan(
+        [
+            { cue: 'result', target: 'visualization:SEX', tooltip: 'b' },
+            {
+                cue: 'next_step',
+                target: 'control:study-view-compare',
+                tooltip: 'c',
+            },
+        ],
+        candidates,
+        []
+    );
+    const check = checkText(
+        '[[1]] Sex split. You should [[next]] compare the groups.',
+        plan
+    );
+    assert.equal(check.ok, true);
+    assert.deepEqual(check.misplaced, []);
+});
+
+test('contextTooltip leaves out a cohort the study name repeats', () => {
+    const slots = emptySlots();
+    slots.cohort = {
+        status: 'specified',
+        value: 'Lung Adenocarcinoma',
+        options: [],
+        source: 'user',
+    };
+    slots.study = {
+        status: 'specified',
+        value: 'Lung Adenocarcinoma (TCGA, PanCancer Atlas)',
+        options: [],
+        source: 'chat',
+    };
+    assert.equal(
+        contextTooltip(slots),
+        'Lung Adenocarcinoma (TCGA, PanCancer Atlas)'
     );
 });

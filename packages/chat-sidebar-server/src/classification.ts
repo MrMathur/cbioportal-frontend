@@ -107,6 +107,11 @@ export const RawClassificationSchema = z.object({
         working_question: z.string(),
         concrete_analysis: z.string(),
     }),
+    question_suggestions: z
+        .array(z.string())
+        .describe(
+            'explore goal only: 2–3 specific working questions within the broad aim; empty otherwise'
+        ),
     rationale: z
         .string()
         .describe('One sentence on the deciding cues, for the research log'),
@@ -146,7 +151,15 @@ export interface Classification {
     // filters count as fixed; false when none is open or it is about another
     // cohort.
     open_study_applies: boolean;
+    // The message is the sidebar's report of a change the user made on the
+    // page: a filter change (its move comes from that change) or, with
+    // page_navigation, another step (studies ticked, a page opened).
+    from_page: boolean;
+    page_navigation: boolean;
     drafts: RawClassification['drafts'];
+    // For an exploring question: specific working questions the user may
+    // pick, within the broad aim.
+    question_suggestions: string[];
     rationale: string;
     // Notes from the catalog check, e.g. why a cohort became ambiguous.
     checks: string[];
@@ -162,6 +175,9 @@ export interface CancerTypeMatch {
     ownStudies: number;
     subtreeStudies: number;
     children: { id: string; name: string; subtreeStudies: number }[];
+    // Types anywhere below with studies of their own, most first (older
+    // sidebars don't send it).
+    subtypes?: { id: string; name: string; ownStudies: number }[];
 }
 
 export interface CatalogStudy {
@@ -199,6 +215,11 @@ export interface GuidanceContext {
     // The open page's type and the elements on it the reply may mark
     // (marks.ts); absent when the sidebar didn't send them.
     pageType?: string;
+    // A change the user made on the page, which this message reports: a
+    // filter change, or another step in words that follow "I".
+    pageAction?:
+        | { move: 'refine' | 'broaden' | 'sibling'; filters: string }
+        | { navigation: string };
     pageTargets?: {
         targetType: string;
         targetId: string;
@@ -269,11 +290,18 @@ function withoutPage(context: GuidanceContext): GuidanceContext {
 }
 
 // Drops ids that sit below another matched id: "lung" and "luad" together
-// mean "lung".
+// mean "lung". A type counts as below another when the other's parent chain
+// (within the matches) or its listed subtypes and children include it.
 function topmostMatches(matches: CancerTypeMatch[]): CancerTypeMatch[] {
     const ids = new Set(matches.map(m => m.id));
     const byId = new Map(matches.map(m => [m.id, m]));
+    const below = new Set<string>();
+    for (const m of matches) {
+        for (const t of m.subtypes ?? []) if (t.id !== m.id) below.add(t.id);
+        for (const c of m.children) below.add(c.id);
+    }
     return matches.filter(m => {
+        if (below.has(m.id)) return false;
         let parent = m.parent;
         const seen = new Set<string>();
         while (parent && !seen.has(parent)) {
@@ -286,15 +314,22 @@ function topmostMatches(matches: CancerTypeMatch[]): CancerTypeMatch[] {
 }
 
 /**
- * Whether a cancer type spans several cohorts the portal keeps apart: no
- * studies of its own and at least two subtypes with studies. Returns the
- * subtypes to choose from, or [] when it's one cohort. A type with studies of
- * its own is one cohort: its subtypes become filters. Which type a common
- * name means ("breast cancer" is Invasive Breast Carcinoma, not the Breast
- * tissue) is the classifier's call, per the codebook prompt.
+ * Whether a cancer type spans several cohorts the portal keeps apart, and if
+ * so the subtypes to choose from ([] when it's one cohort). It is one cohort
+ * when most of its studies are of the type itself: its subtypes then become
+ * filters ("breast cancer", i.e. Invasive Breast Carcinoma). It spans several
+ * when most of its studies belong to two or more subtypes with studies of
+ * their own, at any depth ("lung cancer": lung adenocarcinoma, squamous cell
+ * carcinoma, small cell lung cancer…), even if a few are tagged with the type
+ * itself. Which type a common name means is the classifier's call, per the
+ * codebook prompt.
  */
 export function separateCohorts(type: CancerTypeMatch): string[] {
-    if (type.ownStudies > 0) return [];
+    const inSubtypes = type.subtreeStudies - type.ownStudies;
+    if (type.ownStudies >= inSubtypes) return [];
+    if (type.subtypes && type.subtypes.length >= 2) {
+        return type.subtypes.map(t => t.name);
+    }
     const withStudies = type.children.filter(c => c.subtreeStudies > 0);
     if (withStudies.length < 2) return [];
     return withStudies
@@ -349,8 +384,16 @@ function resolveCohort(
     }
 
     const known = new Map(catalog.cancerTypes.map(t => [t.id, t]));
+    // The ids the classifier matched, or else the candidate named like its
+    // value ("lung adenocarcinoma" for a typo it corrected).
+    const value = raw.value?.trim().toLowerCase();
+    const matchedIds = raw.matched_ids.length
+        ? raw.matched_ids
+        : catalog.cancerTypes
+              .filter(t => value && t.name.toLowerCase() === value)
+              .map(t => t.id);
     const matched = topmostMatches(
-        raw.matched_ids
+        matchedIds
             .map(id => known.get(id))
             .filter((t): t is CancerTypeMatch => Boolean(t))
     );
@@ -362,10 +405,21 @@ function resolveCohort(
         checks.push(
             `cohort: matches ${matched.length} separate cancer types in the portal`
         );
+        // Each match that itself spans several cohorts offers its subtypes,
+        // so the options are the same however the classifier splits a
+        // broad term ("lung cancer": NSCLC and SCLC, or lung).
+        const options = [
+            ...new Set(
+                matched.flatMap(m => {
+                    const subtypes = separateCohorts(m);
+                    return subtypes.length ? subtypes : [m.name];
+                })
+            ),
+        ];
         return {
             ...slot,
             status: 'ambiguous',
-            options: matched.map(m => m.name).slice(0, MAX_OPTIONS),
+            options: options.slice(0, MAX_OPTIONS),
         };
     }
     const subtypes = separateCohorts(matched[0]);
@@ -381,10 +435,16 @@ function resolveCohort(
     }
     if (slot.status === 'ambiguous') {
         checks.push(
-            `cohort: ${matched[0].name} is one cohort in the portal, so specified`
+            `cohort: most ${matched[0].name} studies are of that type itself, so one cohort (specified)`
         );
     }
-    return { ...slot, status: 'specified', options: [] };
+    // The portal's name for it, so searches and chips match it exactly.
+    return {
+        ...slot,
+        status: 'specified',
+        value: matched[0].name,
+        options: [],
+    };
 }
 
 function studyLabel(study: CatalogStudy): string {
@@ -416,9 +476,19 @@ function resolveStudy(
     }
     if (!catalog) return slot;
     const known = new Map(catalog.studies.map(s => [s.studyId, s]));
-    const matched = raw.matched_ids
+    const named = raw.matched_ids
         .map(id => known.get(id))
         .filter((s): s is CatalogStudy => Boolean(s));
+    // Several studies match ("TCGA PanCancer Atlas"), but once the cohort is
+    // settled only those of its cancer type count.
+    const inCohort =
+        cohort.status === 'specified' && cohortIds.length
+            ? named.filter(s => cohortIds.includes(s.cancerTypeId))
+            : [];
+    if (named.length > 1 && inCohort.length === 1) {
+        checks.push(`study: only ${inCohort[0].studyId} is in the cohort`);
+    }
+    const matched = inCohort.length ? inCohort : named;
     if (matched.length === 1) {
         return {
             ...slot,
@@ -446,6 +516,24 @@ function resolveStudy(
         return { ...slot, options };
     }
     return slot;
+}
+
+// The cancer types the cohort means: those the classifier matched, or else
+// the candidate named like the cohort's value (a cohort the user set in the
+// box, which the message may not name).
+function cohortMatchIds(
+    raw: RawClassification,
+    cohort: Slot,
+    catalog: CatalogMatches | undefined
+): string[] {
+    if (raw.slots.cohort.matched_ids.length) {
+        return raw.slots.cohort.matched_ids;
+    }
+    const value = cohort.value?.trim().toLowerCase();
+    if (!value || !catalog) return [];
+    return catalog.cancerTypes
+        .filter(t => t.name.toLowerCase() === value)
+        .map(t => t.id);
 }
 
 // The matched cancer types and their direct subtypes, whose studies count as
@@ -523,6 +611,7 @@ function applyFixed(
 }
 
 const MAX_PARTS = 5;
+const MAX_SUGGESTIONS = 3;
 
 // Parts only count for a multi-part message, at least two, named once each,
 // each with its own answerability (the overall one where it's missing).
@@ -562,7 +651,20 @@ export function overallAnswerability(
     return kinds.includes('custom') ? 'custom' : 'unavailable';
 }
 
+// The move of a message that reports the user's change on the page: a filter
+// change's own move; another step continues the same question.
+function pageMove(
+    action: GuidanceContext['pageAction'],
+    fallback: Move | null
+): Move | null {
+    if (!action) return fallback;
+    return 'move' in action ? action.move : 'same';
+}
+
+// A change the user made on the page refines, broadens or varies the current
+// question; it never starts a new one.
 function isNewTopic(raw: RawClassification, context: GuidanceContext): boolean {
+    if (context.pageAction) return false;
     return Boolean(context.previous) && raw.move === 'new';
 }
 
@@ -572,7 +674,11 @@ export function resolveClassification(
     message: string
 ): Classification {
     const checks: string[] = [];
-    const openStudyApplies = openStudyFits(raw, fullContext);
+    // A change the user made on the page is about the open study.
+    const fromPage = fullContext.pageAction !== undefined;
+    const openStudyApplies =
+        (fromPage && hasSelectedStudy(fullContext)) ||
+        openStudyFits(raw, fullContext);
     if (!openStudyApplies && hasSelectedStudy(fullContext)) {
         checks.push(
             isNewTopic(raw, fullContext)
@@ -601,7 +707,7 @@ export function resolveClassification(
         slots.cohort = resolveCohort(raw.slots.cohort, context, checks);
         slots.cohort = applyFixed('cohort', slots.cohort, raw, context);
         const cohortIds = cohortTypeIds(
-            raw.slots.cohort.matched_ids,
+            cohortMatchIds(raw, slots.cohort, context.catalog),
             context.catalog
         );
         slots.study = resolveStudy(
@@ -616,12 +722,47 @@ export function resolveClassification(
             if (name === 'cohort') continue;
             slots[name] = applyFixed(name, slots[name], raw, context);
         }
+        // One study chosen and no cancer type named: its whole cohort.
+        if (
+            slots.cohort.status === 'missing' &&
+            slots.study.status === 'specified' &&
+            !raw.study_is_collection
+        ) {
+            checks.push('cohort: whole study of the chosen study');
+            slots.cohort = {
+                status: 'specified',
+                value: 'whole study',
+                options: [],
+                source: 'chat',
+            };
+        }
+    }
+
+    // A choice of one is no choice: an ambiguous slot with a single option
+    // ("lung adenocarcinoma" → "Lung Adenocarcinoma") is that option.
+    for (const name of SLOT_NAMES) {
+        const slot = slots[name];
+        if (slot.status === 'ambiguous' && slot.options.length === 1) {
+            checks.push(`${name}: one option only, so specified`);
+            slots[name] = {
+                ...slot,
+                status: 'specified',
+                value: slot.options[0],
+                options: [],
+            };
+        }
     }
 
     const goal = isData ? raw.goal : null;
     const parts = cleanParts(raw);
     const exploring = goal === 'explore';
     const newTopic = isNewTopic(raw, context);
+    const move = context.previous
+        ? pageMove(fullContext.pageAction, raw.move)
+        : null;
+    // A working question the user wrote stays while they ask about the same
+    // thing; a refinement or a sibling question rewrites it.
+    const keepUserQuestion = !newTopic && (move === null || move === 'same');
     const needsGroups =
         isData &&
         (raw.needs_groups ||
@@ -646,17 +787,27 @@ export function resolveClassification(
         parts: parts.map(p => p.name),
         part_answerability: parts.map(p => p.answerability),
         answerability: overallAnswerability(parts, raw.answerability),
-        move: context.previous ? raw.move : null,
+        move,
         open_study_applies: openStudyApplies,
+        from_page: fromPage,
+        page_navigation:
+            fullContext.pageAction !== undefined &&
+            'navigation' in fullContext.pageAction,
         drafts: {
             broad_aim: (!newTopic && context.userAim) || raw.drafts.broad_aim,
             // An exploring question has no specific question yet: only the
             // aim, unless the user wrote a question themselves.
             working_question:
-                (!newTopic && context.userQuestion) ||
+                (keepUserQuestion && context.userQuestion) ||
                 (exploring ? '' : raw.drafts.working_question),
             concrete_analysis: exploring ? '' : raw.drafts.concrete_analysis,
         },
+        question_suggestions: exploring
+            ? raw.question_suggestions
+                  .map(q => q.trim())
+                  .filter(Boolean)
+                  .slice(0, MAX_SUGGESTIONS)
+            : [],
         rationale: raw.rationale,
         checks,
         message,
@@ -709,7 +860,7 @@ export function formatClassifierInput(
         }
         if (context.userQuestion) {
             lines.push(
-                `- working question written by the user: "${context.userQuestion}"`
+                `- working question written by the user: "${context.userQuestion}" (keep it if this message asks the same thing; if it refines or changes the question, draft a new one in the same style)`
             );
         }
         sections.push(`## Fixed outside this message\n\n${lines.join('\n')}`);
@@ -723,8 +874,10 @@ export function formatClassifierInput(
                     `${t.id} | ${t.name} | parent: ${t.parent} | own studies: ${
                         t.ownStudies
                     } | studies incl. subtypes: ${t.subtreeStudies}${
-                        t.children.length
-                            ? ` | subtypes with studies: ${t.children
+                        (t.subtypes ?? t.children).length
+                            ? ` | subtypes with studies: ${(
+                                  t.subtypes ?? t.children
+                              )
                                   .map(ch => ch.name)
                                   .join(', ')}`
                             : ''
@@ -827,11 +980,33 @@ export function parseGuidanceContext(
                 ? v.previous
                 : undefined,
             pageType: str(v.pageType, 40) || undefined,
+            pageAction: parsePageAction(v.pageAction),
             pageTargets: parsePageTargets(v.pageTargets),
         },
         sessionId: str(v.sessionId, 100),
         participant: str(v.participant, 100),
         threadId: str(v.threadId, 100),
+    };
+}
+
+function parsePageAction(value: unknown): GuidanceContext['pageAction'] {
+    const a = value as {
+        move?: unknown;
+        filters?: unknown;
+        navigation?: unknown;
+    } | null;
+    if (a && typeof a.navigation === 'string' && a.navigation.trim()) {
+        return { navigation: a.navigation.trim().slice(0, 300) };
+    }
+    if (
+        !a ||
+        (a.move !== 'refine' && a.move !== 'broaden' && a.move !== 'sibling')
+    ) {
+        return undefined;
+    }
+    return {
+        move: a.move,
+        filters: typeof a.filters === 'string' ? a.filters.slice(0, 300) : '',
     };
 }
 

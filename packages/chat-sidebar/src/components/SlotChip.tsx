@@ -7,6 +7,12 @@ import {
     PopoverTrigger,
 } from '@/components/ui/popover';
 import { Slot, SLOT_LABELS, SlotName } from '@/lib/classification';
+import { getCatalog } from '@/lib/catalog';
+import {
+    resolveStudyText,
+    searchStudies,
+    studyLabel,
+} from '@/lib/catalogMatch';
 import { cn } from '@/lib/utils';
 
 // One slot of the concrete analysis. Specified slots show their value;
@@ -43,6 +49,10 @@ interface Props {
     name: SlotName;
     slot: Slot;
     core: boolean;
+    // The chat is asking the user for this slot (askedSlotsOf).
+    asked: boolean;
+    // The cohort chosen, which the study search looks within first.
+    cohort?: string;
     // Extra choices for an empty slot, e.g. the open study's attributes.
     suggestions: string[];
     onSet: (value: string | null, via: 'option' | 'typed' | 'cleared') => void;
@@ -53,6 +63,8 @@ export const SlotChip: FC<Props> = ({
     name,
     slot,
     core,
+    asked,
+    cohort,
     suggestions,
     onSet,
     onAsk,
@@ -60,6 +72,10 @@ export const SlotChip: FC<Props> = ({
     const [open, setOpen] = useState(false);
     const [draft, setDraft] = useState('');
     const label = SLOT_LABELS[name];
+    // Yellow with a question mark: ambiguous, or missing while the chat asks
+    // for it.
+    const needsAnswer =
+        slot.status === 'ambiguous' || (slot.status === 'missing' && asked);
     const hasValue = slot.status !== 'missing' && Boolean(slot.value);
 
     const choose = (
@@ -71,16 +87,31 @@ export const SlotChip: FC<Props> = ({
         setDraft('');
     };
 
+    // The study slot searches the portal's studies as the user types, and a
+    // typed name that matches one study stores that study, so the portal can
+    // open it.
+    const catalog = name === 'study' ? getCatalog() : undefined;
+    const typed = draft.trim();
+    const searching =
+        catalog !== undefined && typed.length >= 2 && typed !== slot.value;
+    const studyResults = searching
+        ? searchStudies(catalog, typed, cohort).map(studyLabel)
+        : [];
+
     const submit = (e: FormEvent) => {
         e.preventDefault();
-        if (draft.trim()) choose(draft.trim(), 'typed');
+        if (!typed) return;
+        const resolved = catalog
+            ? resolveStudyText(catalog, typed, cohort)
+            : undefined;
+        choose(resolved ?? typed, resolved ? 'option' : 'typed');
     };
 
     const options = slot.status === 'ambiguous' ? slot.options : [];
-    const picks = [
-        ...(slot.status === 'missing' ? slot.options : []),
-        ...suggestions,
-    ].filter((v, i, all) => v && all.indexOf(v) === i && v !== slot.value);
+    const picks = (searching
+        ? studyResults
+        : [...(slot.status === 'missing' ? slot.options : []), ...suggestions]
+    ).filter((v, i, all) => v && all.indexOf(v) === i && v !== slot.value);
 
     return (
         <Popover
@@ -96,14 +127,19 @@ export const SlotChip: FC<Props> = ({
                         type="button"
                         title={`${label}${hasValue ? `: ${slot.value}` : ''}${
                             hasValue ? ` (${SOURCE_LABELS[slot.source]})` : ''
+                        }${
+                            needsAnswer
+                                ? ' · Needs your answer: click to choose'
+                                : ''
                         }`}
                         className={cn(
                             'inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-left text-[11px] leading-4 transition-colors',
                             slot.status === 'specified' &&
                                 'border-[#3786c2]/30 bg-[#3786c2]/10 text-foreground hover:bg-[#3786c2]/15',
-                            slot.status === 'ambiguous' &&
-                                'border-amber-500/60 bg-amber-50 text-amber-950 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-100',
+                            needsAnswer &&
+                                'border-yellow-500 bg-yellow-100 font-medium text-yellow-950 hover:bg-yellow-200 dark:bg-yellow-900/50 dark:text-yellow-100',
                             slot.status === 'missing' &&
+                                !needsAnswer &&
                                 cn(
                                     'border-dashed bg-transparent text-muted-foreground hover:border-[#3786c2]/50 hover:text-foreground',
                                     core
@@ -114,14 +150,17 @@ export const SlotChip: FC<Props> = ({
                     />
                 }
             >
-                {slot.status === 'missing' ? (
-                    <PlusIcon className="size-3 shrink-0" aria-hidden />
-                ) : slot.status === 'ambiguous' ? (
+                {needsAnswer ? (
                     <CircleHelpIcon
-                        className="size-3 shrink-0 text-amber-600"
+                        className="size-3 shrink-0 text-yellow-700 dark:text-yellow-300"
                         aria-hidden
                     />
+                ) : slot.status === 'missing' ? (
+                    <PlusIcon className="size-3 shrink-0" aria-hidden />
                 ) : null}
+                {needsAnswer && (
+                    <span className="sr-only">Needs your answer: </span>
+                )}
                 <span className="shrink-0 font-medium">
                     {SHORT_LABELS[name]}
                 </span>
@@ -158,12 +197,20 @@ export const SlotChip: FC<Props> = ({
                         ))}
                     </div>
                 )}
+                {searching && (
+                    <p className="mb-1 text-[11px] text-muted-foreground">
+                        {studyResults.length
+                            ? 'Matching studies:'
+                            : 'No study matches these words.'}
+                    </p>
+                )}
                 {picks.length > 0 && (
                     <div className="mb-2 flex flex-wrap gap-1">
                         {picks.slice(0, 10).map(pick => (
                             <button
                                 key={pick}
                                 type="button"
+                                title={pick}
                                 onClick={() => choose(pick, 'option')}
                                 className="max-w-full truncate rounded-full border border-border px-1.5 py-0.5 text-[11px] hover:border-[#3786c2]/50 hover:bg-accent"
                             >

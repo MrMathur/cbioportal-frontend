@@ -5,8 +5,8 @@ import { planOfMessage, textOfMessage } from './messageParts';
 
 /**
  * The badge plan of the message this text belongs to, and whether its text
- * links to it: 'chips' while streaming or when the text refers to every mark,
- * 'strip' when they disagree (the answer then shows without numbers).
+ * links to it: 'chips' while streaming or when the text uses the plan's
+ * tokens, 'strip' when it uses none (the answer then shows without numbers).
  */
 export function useMessageMarks(): {
     plan: BadgePlan | undefined;
@@ -22,7 +22,7 @@ export function useMessageMarks(): {
     );
     const matches = useAuiState(s => {
         if (!plan || s.message.status?.type === 'running') return true;
-        return checkText(textOfMessage(s.message), plan).ok;
+        return checkText(textOfMessage(s.message), plan).linkable;
     });
     return { plan, mode: plan && matches ? 'chips' : 'strip' };
 }

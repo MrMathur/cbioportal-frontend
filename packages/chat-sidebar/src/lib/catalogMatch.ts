@@ -49,6 +49,9 @@ export interface CancerTypeMatch {
     subtreeStudies: number;
     // Direct subtypes that have studies of their own somewhere below them.
     children: { id: string; name: string; subtreeStudies: number }[];
+    // Types anywhere below this one that have studies of their own, most
+    // studies first: the cohorts a broad term ("lung cancer") may mean.
+    subtypes: { id: string; name: string; ownStudies: number }[];
 }
 
 export interface CatalogMatches {
@@ -66,6 +69,7 @@ export interface CatalogMatches {
 }
 
 const MAX_CANCER_TYPES = 25;
+const MAX_SUBTYPES = 6;
 const MAX_STUDIES = 30;
 const MAX_CLINICAL_ATTRIBUTES = 40;
 const MAX_PROFILES = 20;
@@ -215,16 +219,72 @@ function toMatch(catalog: Catalog, type: CatalogCancerType): CancerTypeMatch {
             }))
             .filter(child => child.subtreeStudies > 0)
             .sort((a, b) => b.subtreeStudies - a.subtreeStudies),
+        subtypes: [...subtreeIds(catalog, type.id)]
+            .filter(id => id !== type.id)
+            .map(id => ({
+                id,
+                name: index.byId.get(id)?.name ?? id,
+                ownStudies: index.ownStudies.get(id) ?? 0,
+            }))
+            .filter(t => t.ownStudies > 0)
+            .sort(
+                (a, b) =>
+                    b.ownStudies - a.ownStudies || a.name.localeCompare(b.name)
+            )
+            .slice(0, MAX_SUBTYPES),
     };
 }
 
 // Share of the name's own tokens found in the message, with an exact id
 // ("luad", "brca") counting as a full match.
+// Edit distance between two words, stopping early past `max`.
+function withinEdits(a: string, b: string, max: number): boolean {
+    if (Math.abs(a.length - b.length) > max) return false;
+    let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+        const current = [i];
+        let rowMin = i;
+        for (let j = 1; j <= b.length; j++) {
+            current[j] = Math.min(
+                previous[j] + 1,
+                current[j - 1] + 1,
+                previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+            );
+            rowMin = Math.min(rowMin, current[j]);
+        }
+        if (rowMin > max) return false;
+        previous = current;
+    }
+    return previous[b.length] <= max;
+}
+
+const FUZZY_MIN_LENGTH = 6;
+const FUZZY_MAX_EDITS = 2;
+
+/**
+ * Whether the message has the word, or, for a long word, a typo of it:
+ * "adecarcinoma" for "adenocarcinoma" (same first letter, two edits).
+ */
+export function hasWord(tokens: Set<string>, word: string): boolean {
+    if (tokens.has(word)) return true;
+    if (word.length < FUZZY_MIN_LENGTH) return false;
+    for (const token of tokens) {
+        if (
+            token.length >= FUZZY_MIN_LENGTH &&
+            token[0] === word[0] &&
+            withinEdits(token, word, FUZZY_MAX_EDITS)
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function scoreCancerType(type: CatalogCancerType, tokens: Set<string>): number {
     if (tokens.has(type.id.toLowerCase())) return 2;
     const nameTokens = tokenize(type.name);
     if (nameTokens.length === 0) return 0;
-    const hits = nameTokens.filter(t => tokens.has(t)).length;
+    const hits = nameTokens.filter(t => hasWord(tokens, t)).length;
     return hits / nameTokens.length;
 }
 
@@ -235,7 +295,7 @@ function scoreStudy(study: CatalogStudy, tokens: Set<string>): number {
         ...tokenize(study.studyId.replace(/_/g, ' ')),
     ]);
     let hits = 0;
-    for (const token of nameTokens) if (tokens.has(token)) hits++;
+    for (const token of nameTokens) if (hasWord(tokens, token)) hits++;
     return hits;
 }
 
@@ -328,4 +388,83 @@ export function matchCatalog(
         clinicalAttributes,
         molecularProfiles,
     };
+}
+
+const MAX_STUDY_RESULTS = 6;
+
+/** "Name [id]", the study slot's value for a catalog study. */
+export function studyLabel(study: CatalogStudy): string {
+    return `${study.name} [${study.studyId}]`;
+}
+
+// The cancer types a cohort value names and all types below them: the type
+// with that exact name, or else every type whose name has all its words
+// ("lung cancer": every lung type). Empty when it names none ("whole study").
+function cohortTypeIds(
+    catalog: Catalog,
+    cohort: string | undefined
+): Set<string> {
+    const wanted = cohort?.trim().toLowerCase();
+    const ids = new Set<string>();
+    if (!wanted) return ids;
+    let named = catalog.cancerTypes.filter(
+        t => t.name.toLowerCase() === wanted
+    );
+    if (named.length === 0) {
+        const words = tokenize(wanted);
+        named = words.length
+            ? catalog.cancerTypes.filter(t => {
+                  const nameWords = new Set(tokenize(t.name));
+                  return words.every(w => nameWords.has(w));
+              })
+            : [];
+    }
+    for (const type of named) {
+        for (const id of subtreeIds(catalog, type.id)) ids.add(id);
+    }
+    return ids;
+}
+
+/**
+ * Studies whose name or id contains every word typed, largest first: what the
+ * study slot offers while the user types. Within the cohort chosen, when its
+ * cancer type has any matching study.
+ */
+export function searchStudies(
+    catalog: Catalog,
+    text: string,
+    cohort?: string
+): CatalogStudy[] {
+    const words = text
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+    if (words.length === 0) return [];
+    const matching = catalog.studies.filter(study => {
+        const haystack = `${study.name} ${study.studyId}`.toLowerCase();
+        return words.every(w => haystack.includes(w));
+    });
+    const inCohort = cohortTypeIds(catalog, cohort);
+    const narrowed = matching.filter(s => inCohort.has(s.cancerTypeId));
+    return (narrowed.length ? narrowed : matching)
+        .sort((a, b) => b.sampleCount - a.sampleCount)
+        .slice(0, MAX_STUDY_RESULTS);
+}
+
+/** The one study a typed value names, as its label; undefined otherwise. */
+export function resolveStudyText(
+    catalog: Catalog,
+    text: string,
+    cohort?: string
+): string | undefined {
+    const wanted = text.trim().toLowerCase();
+    const exact = catalog.studies.find(
+        s =>
+            s.studyId.toLowerCase() === wanted ||
+            s.name.toLowerCase() === wanted ||
+            studyLabel(s).toLowerCase() === wanted
+    );
+    if (exact) return studyLabel(exact);
+    const found = searchStudies(catalog, text, cohort);
+    return found.length === 1 ? studyLabel(found[0]) : undefined;
 }

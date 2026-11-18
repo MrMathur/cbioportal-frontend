@@ -76,13 +76,15 @@ Slots fixed in earlier turns stay specified when this message is a follow-up of 
 
 ## Drafts
 
-Draft the levels of the research question, in the user's language, so the user can start at any level and edit the others. For an `explore` goal, draft only `broad_aim` and leave `working_question` and `concrete_analysis` empty: the user hasn't asked a specific question yet.
+Draft the levels of the research question, in the user's language, so the user can start at any level and edit the others. For an `explore` goal, draft only `broad_aim` and leave `working_question` and `concrete_analysis` empty: the user hasn't asked a specific question yet. Instead, give 2–3 `question_suggestions`: specific working questions within the broad aim that the portal can answer, each naming the measure and, where it fits, groups (e.g. for "Understand IDH1 in lower grade glioma": "Is IDH1 mutation associated with longer overall survival in lower grade glioma?"). Leave `question_suggestions` empty for any other goal.
 
 - `broad_aim` (L1): a short aim, e.g. "Understand KRAS in lung cancer".
 - `working_question` (L3): one researchable question, e.g. "Is KRAS mutation linked to worse overall survival in female lung adenocarcinoma patients?". Use only what the user gave and what is fixed; where a slot is missing or ambiguous keep the question general rather than inventing a value.
 - `concrete_analysis` (L4): one line naming the analysis, e.g. "Overall survival, KRAS-mutant vs wild-type, female patients, TCGA LUAD PanCancer Atlas". Only slots that are specified.
 
 When the user wrote the aim or working question themselves (see "Fixed outside this message"), copy it unchanged and draft only the other levels.
+
+**Steps on the page.** A message starting "On the page, I …" was sent by the sidebar: the user changed the page themselves (filters, studies ticked, a query run, Group Comparison opened). It continues the current research question: classify it as `data` (never `interface`), with the previous slots updated by the step. A step that adds groups (Group Comparison with groups Female and Male, a filter that splits the cohort) makes the question a comparison: set `groups`, `needs_groups` and an `explain` goal, and redraft the working question and concrete analysis around the comparison (e.g. "Do the top mutated genes in lung adenocarcinoma differ between male and female patients?"). A step that narrows the cohort adds it to the question ("…in female patients").
 
 For non-data requests that relate to the current research question, keep the previous drafts. For unrelated non-data requests, draft from the message as well as you can.
 

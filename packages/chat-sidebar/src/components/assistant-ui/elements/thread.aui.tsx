@@ -1,5 +1,7 @@
 'use client';
 
+import { isPageUpdateMessage } from '@/lib/topics';
+import { isBoxAnswerMessage } from '@/lib/boxAnswers';
 import { MarksLegend, PartChips } from '@/components/AnswerMarks';
 import { ClassificationBadge } from '@/components/ClassificationBadge';
 import {
@@ -54,6 +56,7 @@ import {
     DownloadIcon,
     LucideIcon,
     MessageCircleIcon,
+    MousePointerClickIcon,
     MicIcon,
     MoreHorizontalIcon,
     PencilIcon,
@@ -786,6 +789,19 @@ const UserImagePart: ImageMessagePartComponent = part => (
 );
 
 const UserMessage: FC = () => {
+    // A message the sidebar sent on the user's behalf: for a filter change
+    // made on the page, or an answer given in the research question box.
+    const origin = useAuiState(s => {
+        const text = s.message.content
+            .map(part => (part.type === 'text' ? part.text : ''))
+            .join('');
+        return isPageUpdateMessage(text)
+            ? 'page'
+            : isBoxAnswerMessage(text)
+            ? 'box'
+            : null;
+    });
+    const fromPage = origin !== null;
     return (
         <MessagePrimitive.Root
             data-slot="aui_user-message-root"
@@ -795,7 +811,22 @@ const UserMessage: FC = () => {
             <UserMessageAttachments />
 
             <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
-                <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
+                {fromPage && (
+                    <div className="text-muted-foreground mb-0.5 flex items-center justify-end gap-1 text-[11px]">
+                        <MousePointerClickIcon className="size-3" aria-hidden />
+                        {origin === 'page'
+                            ? 'Sent for your change on the page'
+                            : 'Sent from your research question box'}
+                    </div>
+                )}
+                <div
+                    className={cn(
+                        'aui-user-message-content peer text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden',
+                        fromPage
+                            ? 'border border-dashed border-[#3786c2]/40 bg-[#3786c2]/5 text-sm'
+                            : 'bg-muted'
+                    )}
+                >
                     <MessagePrimitive.Parts
                         components={{
                             File: UserFilePart,

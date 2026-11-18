@@ -3,6 +3,7 @@ import { useAui } from '@assistant-ui/react';
 import {
     ChevronDownIcon,
     CompassIcon,
+    LightbulbIcon,
     LucideIcon,
     MessageCircleQuestionIcon,
     SendIcon,
@@ -10,6 +11,11 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from '@/components/ui/popover';
 import {
     Tooltip,
     TooltipContent,
@@ -22,6 +28,8 @@ import { getStudyContext } from '@/lib/catalog';
 import { SLOT_LABELS, SLOT_NAMES, SlotName } from '@/lib/classification';
 import { logGuidanceEvent } from '@/lib/guidanceLog';
 import { syncPortalToSlots } from '@/lib/portalSync';
+import { slotAnswerMessage } from '@/lib/boxAnswers';
+import { appendWhenIdle } from '@/lib/appendWhenIdle';
 import { retryClassification } from '@/lib/classificationRetry';
 import {
     ActiveResearch,
@@ -92,8 +100,18 @@ const EditableText: FC<{
     // and the editor.
     clamp: 1 | 3;
     onSave: (value: string) => void;
-}> = ({ value, placeholder, label, emphasis, clamp, onSave }) => {
+    onEditingChange?: (editing: boolean) => void;
+}> = ({
+    value,
+    placeholder,
+    label,
+    emphasis,
+    clamp,
+    onSave,
+    onEditingChange,
+}) => {
     const [editing, setEditing] = useState(false);
+    useEffect(() => onEditingChange?.(editing), [editing, onEditingChange]);
     const [draft, setDraft] = useState(value);
     const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -190,6 +208,98 @@ const LevelIcon: FC<{ icon: LucideIcon; label: string; hint: string }> = ({
     </TooltipProvider>
 );
 
+const HOVER_OPEN_MS = 250;
+const HOVER_CLOSE_MS = 300;
+
+// The broad aim, and for an exploring question the working questions the
+// user could pick: shown when hovering the aim (or from its lightbulb).
+const AimLine: FC<{ research: ActiveResearch }> = ({ research }) => {
+    const suggestions = research.questionSuggestions;
+    const [open, setOpen] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const timer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(timer.current), []);
+
+    const later = (next: boolean, ms: number) => {
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setOpen(next), ms);
+    };
+    const hoverable = suggestions.length > 0 && !editing;
+
+    const pick = (question: string) => {
+        setOpen(false);
+        setQuestionByUser(research.threadId, research.localThreadId, question);
+    };
+
+    return (
+        <Popover open={open && hoverable} onOpenChange={setOpen}>
+            <div
+                className="flex min-w-0 flex-1 items-start gap-1"
+                onMouseEnter={() => hoverable && later(true, HOVER_OPEN_MS)}
+                onMouseLeave={() => later(false, HOVER_CLOSE_MS)}
+            >
+                <div className="min-w-0 flex-1">
+                    <EditableText
+                        value={research.aim}
+                        label="Broad aim"
+                        placeholder="Broad aim, e.g. Understand KRAS in lung cancer"
+                        clamp={1}
+                        onEditingChange={setEditing}
+                        onSave={text =>
+                            setAimByUser(
+                                research.threadId,
+                                research.localThreadId,
+                                text
+                            )
+                        }
+                    />
+                </div>
+                {suggestions.length > 0 && (
+                    <PopoverTrigger
+                        render={
+                            <button
+                                type="button"
+                                aria-label={`${suggestions.length} questions you could ask`}
+                                title="Questions you could ask"
+                                className="mt-0.5 inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[#3786c2]/10 px-1.5 text-[10px] leading-4 font-medium text-[#3786c2] hover:bg-[#3786c2]/20"
+                            />
+                        }
+                    >
+                        <LightbulbIcon className="size-3" aria-hidden />
+                        {suggestions.length}
+                    </PopoverTrigger>
+                )}
+            </div>
+            <PopoverContent
+                align="start"
+                className="w-72 p-2 text-xs"
+                onMouseEnter={() => clearTimeout(timer.current)}
+                onMouseLeave={() => later(false, HOVER_CLOSE_MS)}
+            >
+                <p className="mb-1 font-medium text-foreground">
+                    Questions you could ask
+                </p>
+                <div className="flex flex-col gap-1">
+                    {suggestions.map(question => (
+                        <button
+                            key={question}
+                            type="button"
+                            onClick={() => pick(question)}
+                            className="rounded-md border border-border px-2 py-1 text-left leading-snug hover:border-[#3786c2]/50 hover:bg-accent"
+                        >
+                            {question}
+                        </button>
+                    ))}
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    Pick one to make it your working question, then send it with
+                    the arrow.
+                </p>
+            </PopoverContent>
+        </Popover>
+    );
+};
+
 export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
     research,
 }) => {
@@ -227,8 +337,10 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
     const gaps = SLOT_NAMES.filter(
         n => research.slots[n].status === 'ambiguous'
     ).length;
-    const coreMissing = (['cohort', 'entity', 'measure'] as SlotName[]).filter(
-        n => research.slots[n].status === 'missing'
+    const coreMissing = SLOT_NAMES.filter(
+        n =>
+            research.slots[n].status === 'missing' &&
+            research.askedSlots.includes(n)
     ).length;
     const hasAnything =
         Boolean(research.question || research.aim) ||
@@ -255,6 +367,24 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
             'ask_slot'
         );
     };
+
+    const toggleButton = (
+        <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-expanded={expanded}
+            aria-label={
+                expanded ? 'Hide aim and analysis' : 'Show aim and analysis'
+            }
+            title={expanded ? 'Collapse' : 'Expand'}
+            onClick={toggle}
+            className="text-muted-foreground"
+        >
+            <ChevronDownIcon
+                className={cn('transition-transform', expanded && 'rotate-180')}
+            />
+        </Button>
+    );
 
     const gapNote = [
         gaps ? `${gaps} to clarify` : '',
@@ -286,124 +416,132 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
                     </Button>
                 </div>
             )}
-            <div className="flex items-start gap-1.5">
-                <LevelIcon
-                    icon={MessageCircleQuestionIcon}
-                    label="Working question"
-                    hint="The question you are answering now. Click it to edit."
-                />
-                <div className="min-w-0 flex-1">
-                    <EditableText
-                        value={research.question}
-                        label="Working question"
-                        placeholder={
-                            hasAnything
-                                ? 'Write your question'
-                                : 'Ask in the chat, or write your question here'
-                        }
-                        emphasis
-                        clamp={3}
-                        onSave={text =>
-                            setQuestionByUser(threadId, localId, text)
-                        }
+            {(expanded || (!research.question && research.aim)) && (
+                <div className="flex items-start gap-1.5">
+                    <LevelIcon
+                        icon={CompassIcon}
+                        label="Broad aim"
+                        hint="What you want to understand overall. Hover it for questions you could ask."
                     />
+                    <AimLine research={research} />
+                    {!expanded && toggleButton}
                 </div>
-                {!expanded && hasAnything && gapNote && (
-                    <button
-                        type="button"
-                        onClick={toggle}
-                        title="Show the analysis parts"
-                        className="mt-0.5 shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] leading-4 text-amber-800 dark:text-amber-200"
-                    >
-                        {gapNote}
-                    </button>
-                )}
-                {research.editedSinceMessage && research.question && (
-                    <TooltipIconButton
-                        tooltip="Ask with this question"
-                        size="icon-xs"
-                        className="text-[#3786c2]"
-                        onClick={() => ask(research.question, 'send_question')}
-                    >
-                        <SendIcon />
-                    </TooltipIconButton>
-                )}
-                <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-expanded={expanded}
-                    aria-label={
-                        expanded
-                            ? 'Hide aim and analysis'
-                            : 'Show aim and analysis'
-                    }
-                    title={expanded ? 'Collapse' : 'Expand'}
-                    onClick={toggle}
-                    className="text-muted-foreground"
-                >
-                    <ChevronDownIcon
-                        className={cn(
-                            'transition-transform',
-                            expanded && 'rotate-180'
-                        )}
+            )}
+            {(expanded || research.question || !research.aim) && (
+                <div className="flex items-start gap-1.5">
+                    <LevelIcon
+                        icon={MessageCircleQuestionIcon}
+                        label="Working question"
+                        hint="The question you are answering now. Click it to edit."
                     />
-                </Button>
-            </div>
+                    <div className="min-w-0 flex-1">
+                        <EditableText
+                            value={research.question}
+                            label="Working question"
+                            placeholder={
+                                research.questionSuggestions.length
+                                    ? 'Pick a question from the aim, or write one'
+                                    : hasAnything
+                                    ? 'Write your question'
+                                    : 'Ask in the chat, or write your question here'
+                            }
+                            emphasis
+                            clamp={3}
+                            onSave={text =>
+                                setQuestionByUser(threadId, localId, text)
+                            }
+                        />
+                    </div>
+                    {!expanded && hasAnything && gapNote && (
+                        <button
+                            type="button"
+                            onClick={toggle}
+                            title="Show the analysis parts"
+                            className="mt-0.5 shrink-0 rounded-full bg-yellow-100 px-1.5 text-[10px] leading-4 text-yellow-900 dark:bg-yellow-900/50 dark:text-yellow-100"
+                        >
+                            {gapNote}
+                        </button>
+                    )}
+                    {research.editedSinceMessage && research.question && (
+                        <TooltipIconButton
+                            tooltip="Ask with this question"
+                            size="icon-xs"
+                            className="text-[#3786c2]"
+                            onClick={() =>
+                                ask(research.question, 'send_question')
+                            }
+                        >
+                            <SendIcon />
+                        </TooltipIconButton>
+                    )}
+                    {(expanded || !research.aim || research.question) &&
+                        toggleButton}
+                </div>
+            )}
 
             {expanded && (
-                <>
-                    <div className="flex items-start gap-1.5">
-                        <LevelIcon
-                            icon={CompassIcon}
-                            label="Broad aim"
-                            hint="What you want to understand overall."
-                        />
-                        <div className="min-w-0 flex-1">
-                            <EditableText
-                                value={research.aim}
-                                label="Broad aim"
-                                placeholder="Broad aim, e.g. Understand KRAS in lung cancer"
-                                clamp={1}
-                                onSave={text =>
-                                    setAimByUser(threadId, localId, text)
+                <div className="flex items-start gap-1.5">
+                    <LevelIcon
+                        icon={SlidersHorizontalIcon}
+                        label="Concrete analysis"
+                        hint="The parts of the analysis. Yellow parts with ? need your answer; dashed ones are optional. Click one to set it."
+                    />
+                    <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                        {SLOT_NAMES.map(name => (
+                            <SlotChip
+                                key={name}
+                                name={name}
+                                slot={research.slots[name]}
+                                core={
+                                    name === 'cohort' ||
+                                    name === 'entity' ||
+                                    name === 'measure'
                                 }
-                            />
-                        </div>
-                    </div>
-                    <div className="flex items-start gap-1.5">
-                        <LevelIcon
-                            icon={SlidersHorizontalIcon}
-                            label="Concrete analysis"
-                            hint="The parts of the analysis. Dashed parts are missing, amber ones need a choice; click one to set it."
-                        />
-                        <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-                            {SLOT_NAMES.map(name => (
-                                <SlotChip
-                                    key={name}
-                                    name={name}
-                                    slot={research.slots[name]}
-                                    core={
-                                        name === 'cohort' ||
-                                        name === 'entity' ||
-                                        name === 'measure'
-                                    }
-                                    suggestions={suggestionsFor(name, research)}
-                                    onSet={(value, via) => {
-                                        setSlotByUser(
-                                            threadId,
-                                            localId,
+                                asked={research.askedSlots.includes(name)}
+                                cohort={
+                                    research.slots.cohort.status === 'specified'
+                                        ? research.slots.cohort.value ??
+                                          undefined
+                                        : undefined
+                                }
+                                suggestions={suggestionsFor(name, research)}
+                                onSet={(value, via) => {
+                                    const answersChat =
+                                        Boolean(value) &&
+                                        research.askedSlots.includes(name);
+                                    setSlotByUser(
+                                        threadId,
+                                        localId,
+                                        name,
+                                        value,
+                                        via
+                                    );
+                                    syncPortalToSlots();
+                                    // The chat asked for this slot: filling it
+                                    // here answers the chat.
+                                    if (answersChat && value) {
+                                        const text = slotAnswerMessage(
                                             name,
-                                            value,
-                                            via
+                                            value
                                         );
-                                        syncPortalToSlots();
-                                    }}
-                                    onAsk={() => askAboutSlot(name)}
-                                />
-                            ))}
-                        </div>
+                                        appendWhenIdle(aui.thread, text, () =>
+                                            logGuidanceEvent(
+                                                'slot_answer_sent',
+                                                logThread,
+                                                {
+                                                    slot: name,
+                                                    new_value: value,
+                                                    question: text,
+                                                }
+                                            )
+                                        );
+                                    }
+                                }}
+                                onAsk={() => askAboutSlot(name)}
+                            />
+                        ))}
                     </div>
-                </>
+                </div>
             )}
         </div>
     );

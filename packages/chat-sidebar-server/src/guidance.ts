@@ -42,6 +42,9 @@ export function sectionNamesFor(c: Classification): string[] {
         }
     }
     if (c.multi_part) names.push('multi_part');
+    if (c.from_page) {
+        names.push(c.page_navigation ? 'page_navigation' : 'page_update');
+    }
     return names;
 }
 
@@ -70,6 +73,8 @@ function forReply(c: Classification): object {
         answerability: c.answerability,
         move: c.move,
         open_study_applies: c.open_study_applies,
+        from_page: c.from_page,
+        page_navigation: c.page_navigation,
     };
 }
 

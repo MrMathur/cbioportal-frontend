@@ -10,6 +10,7 @@ import {
     subscribeToResearch,
 } from './researchQuestion';
 import {
+    cleanTooltip,
     contextTooltip,
     CONTEXT_TARGET,
     markKey,
@@ -247,6 +248,7 @@ function postToHost(): void {
         : highlightQuery(research) && state.status === 'ready'
         ? state.annotations.map(a => ({
               ...a,
+              reason: cleanTooltip(a.reason),
               cue: 'result',
               number: a.rank,
               linked: false,

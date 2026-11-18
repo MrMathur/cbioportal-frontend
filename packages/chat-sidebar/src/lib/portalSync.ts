@@ -31,7 +31,7 @@ function go(
     if (!target) return;
     const path = pathFor(target);
     expectPageNavigation();
-    markNavigationStarted(getLatestPageEvents().settledSnapshot?.href);
+    markNavigationStarted(getLatestPageEvents().settledSnapshot?.href, path);
     notifyNavigate(path);
     const research = getActiveResearch();
     logGuidanceEvent(
@@ -49,7 +49,12 @@ export function syncPortalToClassification(
     if (!guidanceEnabled) return;
     if (localThreadId !== getActiveResearch().localThreadId) return;
     go(
-        targetForClassification(c, getCatalog()?.studies ?? [], currentPage()),
+        targetForClassification(
+            c,
+            getCatalog()?.studies ?? [],
+            currentPage(),
+            getCatalog()
+        ),
         'classification'
     );
 }
@@ -61,7 +66,8 @@ export function syncPortalToSlots(): void {
         targetForSlots(
             getActiveResearch().slots,
             getCatalog()?.studies ?? [],
-            currentPage()
+            currentPage(),
+            getCatalog()
         ),
         'slot_edit'
     );

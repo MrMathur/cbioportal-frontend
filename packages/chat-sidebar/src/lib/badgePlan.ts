@@ -209,7 +209,13 @@ function startsSentence(text: string, index: number): boolean {
 }
 
 export interface TextCheck {
+    // The text refers to every mark once, numbers opening their sentence.
     ok: boolean;
+    // The text uses some of the plan's tokens, so its chips can link to the
+    // badges. Every token comes from the plan, so a chip's number always
+    // matches its badge, even when the text repeats a token or puts it
+    // mid-sentence; those are logged, not stripped.
+    linkable: boolean;
     // Marks the text never refers to, tokens with no mark, and tokens that
     // don't start their sentence.
     missing: string[];
@@ -231,13 +237,20 @@ export function checkText(text: string, plan: BadgePlan): TextCheck {
             unknown.push(token);
             continue;
         }
-        if (!startsSentence(text, match.index!)) misplaced.push(token);
+        // Numbered results must open their sentence, so the chat's numbers
+        // line up with the badges; a context or next-step marker inside a
+        // sentence still reads as an inline chip.
+        const numbered = /^\[\[\d+\]\]$/.test(token);
+        if (numbered && !startsSentence(text, match.index!)) {
+            misplaced.push(token);
+        }
     }
     const missing = [...expected].filter(t => !seen.has(t));
     const duplicated = [...seen]
         .filter(([t, n]) => expected.has(t) && n > 1)
         .map(([t]) => t);
     return {
+        linkable: [...seen.keys()].some(t => expected.has(t)),
         ok:
             missing.length === 0 &&
             unknown.length === 0 &&
@@ -293,9 +306,14 @@ export function contextTooltip(slots: {
     const cohort = value(slots.cohort);
     const study = value(slots.study)?.replace(/\s*\[[^\]]+\]\s*$/, '');
     const filter = value(slots.filter);
+    // A study named after the cohort says it already.
+    const cohortShown =
+        cohort === 'whole study' ||
+        (cohort && study?.toLowerCase().includes(cohort.toLowerCase()))
+            ? null
+            : cohort;
     return cleanTooltip(
-        [cohort === 'whole study' ? null : cohort, study, filter]
-            .filter(Boolean)
-            .join(', ') || 'The cohort you are looking at'
+        [cohortShown, study, filter].filter(Boolean).join(', ') ||
+            'The cohort you are looking at'
     );
 }

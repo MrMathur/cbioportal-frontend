@@ -13,9 +13,11 @@ import { templateQuestion } from './researchTemplate';
 import { PREFIX } from './threadStorage';
 import {
     addPageAction,
+    addPageNavigation,
     addQuestion,
     QuestionEntry,
     Topic,
+    updateLatestPageStep,
     updateLatestQuestion,
 } from './topics';
 import { filterKeysFromHref } from './pageSlots';
@@ -53,6 +55,11 @@ export interface ResearchState {
     // The latest message when its classification failed, so the box can say
     // it is out of date and offer to classify it again; empty otherwise.
     failedMessage: string;
+    // Working questions to pick from, offered for an exploring question.
+    questionSuggestions: string[];
+    // The slots the chat is asking the user for: missing or ambiguous core
+    // slots, and the study while it isn't settled (L3).
+    askedSlots: SlotName[];
     topics: Topic[];
 }
 
@@ -78,6 +85,8 @@ function empty(): ResearchState {
         interfaceQuery: '',
         editedSinceMessage: false,
         failedMessage: '',
+        questionSuggestions: [],
+        askedSlots: [],
         topics: [],
     };
 }
@@ -137,6 +146,16 @@ function read(threadId: string): ResearchState {
                 interfaceQuery: str(parsed.interfaceQuery),
                 editedSinceMessage: parsed.editedSinceMessage === true,
                 failedMessage: str(parsed.failedMessage),
+                questionSuggestions: Array.isArray(parsed.questionSuggestions)
+                    ? parsed.questionSuggestions.filter(
+                          (q: unknown): q is string => typeof q === 'string'
+                      )
+                    : [],
+                askedSlots: Array.isArray(parsed.askedSlots)
+                    ? parsed.askedSlots.filter((n: unknown): n is SlotName =>
+                          SLOT_NAMES.includes(n as SlotName)
+                      )
+                    : [],
                 topics: Array.isArray(parsed.topics) ? parsed.topics : [],
             };
         }
@@ -212,6 +231,8 @@ function publish(next: ActiveResearch): void {
         next.interfaceQuery === active.interfaceQuery &&
         next.editedSinceMessage === active.editedSinceMessage &&
         next.failedMessage === active.failedMessage &&
+        next.questionSuggestions === active.questionSuggestions &&
+        next.askedSlots === active.askedSlots &&
         next.topics === active.topics
     ) {
         return;
@@ -249,6 +270,7 @@ export function setActiveResearchThread(
     if (switched && guidanceEnabled) {
         trackLatestPage = false;
         appliedPageSlots = {};
+        slotsBeforePage = {};
         applyPageSlots();
     }
 }
@@ -430,7 +452,11 @@ export function applyClassification(
         localThreadId,
         state => {
             previousTopic = state.topics[0];
-            const added = addQuestion(state.topics, c, href);
+            // A reply to a filter change on the page belongs to the page step
+            // already recorded for it, not to a new question.
+            const added = c.from_page
+                ? { topics: state.topics, started: undefined, entry: undefined }
+                : addQuestion(state.topics, c, href);
             started = added.started;
             entry = added.entry;
             const next: ResearchState = {
@@ -447,7 +473,12 @@ export function applyClassification(
             }
             const newTopic = Boolean(started) && state.topics.length > 0;
             const aimByUser = state.aimByUser && !newTopic;
-            const questionByUser = state.questionByUser && !newTopic;
+            // A question the user wrote stays while they ask the same thing;
+            // a refinement or sibling question gets the classifier's new one.
+            const questionByUser =
+                state.questionByUser &&
+                !newTopic &&
+                (c.move === null || c.move === 'same');
             const question = questionByUser
                 ? state.question
                 : c.drafts.working_question.trim();
@@ -460,6 +491,8 @@ export function applyClassification(
                 concrete: c.drafts.concrete_analysis.trim(),
                 goal: c.goal,
                 slots: c.slots,
+                questionSuggestions: c.question_suggestions ?? [],
+                askedSlots: askedSlotsOf(c),
                 dismissed: question === state.question && state.dismissed,
             };
         },
@@ -467,7 +500,13 @@ export function applyClassification(
             Boolean(next.question || next.aim) &&
             (prev.question !== next.question || prev.aim !== next.aim)
     );
-    trackLatestPage = localThreadId === active.localThreadId;
+    if (localThreadId === active.localThreadId) {
+        for (const name of SLOT_NAMES) {
+            if (c.slots[name].source !== 'page') delete slotsBeforePage[name];
+        }
+    }
+    replyFromPage.set(localThreadId, c.from_page === true);
+    trackLatestPage = !c.from_page && localThreadId === active.localThreadId;
     if (started) {
         logGuidanceEvent('topic_change', threadId ?? localThreadId, {
             topic_id: started.id,
@@ -478,6 +517,14 @@ export function applyClassification(
             question_id: entry?.id,
         });
     }
+}
+
+// What the chat asks the user for after this message: the core slots it
+// lacks or finds ambiguous, and the study while it isn't settled (L3).
+export function askedSlotsOf(c: Classification): SlotName[] {
+    const asked = c.core_slots.filter(n => c.slots[n].status !== 'specified');
+    if (c.level === 'L3' && !asked.includes('study')) asked.push('study');
+    return asked;
 }
 
 /** The latest message's classification failed: the box is out of date. */
@@ -517,6 +564,9 @@ export function setSlotByUser(
         return {
             ...state,
             slots,
+            askedSlots: trimmed
+                ? state.askedSlots.filter(n => n !== name)
+                : state.askedSlots,
             question: newQuestion,
             questionByUser: false,
             concrete: concreteFromSlots(slots),
@@ -632,14 +682,21 @@ export function setLatestQuestionPage(href: string): void {
     }));
 }
 
+// Whether each chat's latest reply answers a filter change on the page, so
+// its finding goes on that page step.
+const replyFromPage = new Map<string, boolean>();
+
 export function setLatestFinding(
     threadId: string | undefined,
     localThreadId: string,
     finding: string
 ): void {
+    const onPageStep = replyFromPage.get(localThreadId) === true;
     updateThread(threadId, localThreadId, state => ({
         ...state,
-        topics: updateLatestQuestion(state.topics, { finding }),
+        topics: onPageStep
+            ? updateLatestPageStep(state.topics, { finding })
+            : updateLatestQuestion(state.topics, { finding }),
     }));
 }
 
@@ -647,6 +704,9 @@ export function setLatestFinding(
 // stays until the page itself changes.
 let latestPageSlots: Partial<Record<SlotName, string>> = {};
 let appliedPageSlots: Partial<Record<SlotName, string>> = {};
+// The chat's slots the page replaced, given back (options included) once the
+// page no longer sets them.
+let slotsBeforePage: Partial<Record<SlotName, Slot>> = {};
 
 /**
  * Slots read from the page (open study, Study View filters, gene query).
@@ -679,6 +739,7 @@ function applyPageSlots(): void {
             continue;
         }
         if (value) {
+            if (current.source !== 'page') slotsBeforePage[name] = current;
             slots[name] = {
                 status: 'specified',
                 value,
@@ -687,12 +748,13 @@ function applyPageSlots(): void {
             };
             changed = true;
         } else if (current.source === 'page') {
-            slots[name] = {
+            slots[name] = slotsBeforePage[name] ?? {
                 status: 'missing',
                 value: null,
                 options: [],
                 source: 'chat',
             };
+            delete slotsBeforePage[name];
             changed = true;
         }
     }
@@ -720,7 +782,12 @@ const EXPECTED_NAVIGATION_MS = 20_000;
 /** Called before the sidebar navigates the portal itself. */
 export function expectPageNavigation(): void {
     expectedNavigationAt = Date.now();
+    expectedViewAt = expectedNavigationAt;
 }
+
+// The same, for the page view the navigation lands on (pageSync.ts), which
+// may settle after the URL changes.
+let expectedViewAt = 0;
 
 function pageFilterText(): string {
     return [
@@ -796,4 +863,62 @@ export function recordPageChange(href: string): void {
             }
         );
     }
+}
+
+/**
+ * Whether a new page view is where the sidebar itself just navigated the
+ * portal. Answers true once per navigation.
+ */
+export function takeExpectedPageView(): boolean {
+    const expected = Date.now() - expectedViewAt < EXPECTED_NAVIGATION_MS;
+    expectedViewAt = 0;
+    return expected;
+}
+
+// Page steps recorded in this tab, which the chat responds to even when they
+// are already there as the chat opens (a page opened in a new tab).
+const freshPageSteps = new Set<string>();
+
+export function isFreshPageStep(id: string): boolean {
+    return freshPageSteps.has(id);
+}
+
+/**
+ * A step the user took on the page other than a filter change (pageNavigation
+ * .ts), added to the current topic so the chat can respond to it. False when
+ * there is no topic to add it to (yet).
+ */
+export function recordPageNavigation(did: string, href: string): boolean {
+    if (!guidanceEnabled || active.topics.length === 0) return false;
+    let recorded: QuestionEntry | undefined;
+    let topicId = '';
+    updateThread(active.threadId, active.localThreadId, state => {
+        const result = addPageNavigation(state.topics, {
+            did,
+            aim: state.aim,
+            question: templateQuestion(state.goal, state.slots),
+            goal: state.goal,
+            slots: state.slots,
+            href,
+        });
+        recorded = result.entry;
+        topicId = result.topics[0]?.id ?? '';
+        return { ...state, topics: result.topics };
+    });
+    trackLatestPage = false;
+    if (recorded) {
+        freshPageSteps.add(recorded.id);
+        logGuidanceEvent(
+            'page_action',
+            active.threadId ?? active.localThreadId,
+            {
+                topic_id: topicId,
+                question_id: recorded.id,
+                move: 'navigation',
+                question: recorded.text,
+                href,
+            }
+        );
+    }
+    return true;
 }

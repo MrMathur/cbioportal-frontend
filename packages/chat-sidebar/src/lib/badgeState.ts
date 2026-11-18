@@ -11,7 +11,7 @@ import { embedded, parentOrigin } from './parent-origin';
 export interface ActivePlan {
     messageId: string;
     plan: BadgePlan;
-    // Whether the text refers to every mark (badgePlan.checkText); while the
+    // Whether the text links to the marks (badgePlan.checkText); while the
     // reply streams it is assumed. Unlinked marks show without chat links.
     linked: boolean;
 }

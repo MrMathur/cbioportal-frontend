@@ -121,6 +121,7 @@ function raw(overrides: Partial<RawClassification> = {}): RawClassification {
             working_question: 'question',
             concrete_analysis: 'analysis',
         },
+        question_suggestions: ['Is A linked to B?', 'Does C differ by D?'],
         rationale: 'because',
         ...overrides,
     };
@@ -242,6 +243,24 @@ test('an open study fills cohort as whole study and the study slot', () => {
     assert.equal(c.level, 'L4');
 });
 
+test('a chosen study without a cancer type is its whole cohort', () => {
+    const c = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot('missing', null),
+                study: slot('specified', 'METABRIC', ['brca_metabric']),
+                entity: slot('specified', 'TP53'),
+                measure: slot('specified', 'overall survival'),
+            },
+        }),
+        ctx(),
+        'm'
+    );
+    assert.equal(c.slots.cohort.status, 'specified');
+    assert.equal(c.slots.cohort.value, 'whole study');
+});
+
 test('groups are core only when needed per group', () => {
     const slots = {
         ...raw().slots,
@@ -353,6 +372,23 @@ test('user-written aim and question are kept; move needs a previous turn', () =>
     assert.equal(c.drafts.broad_aim, 'My aim');
     assert.equal(c.drafts.working_question, 'My question?');
     assert.equal(c.move, null);
+});
+
+test('a refinement rewrites a user-written question; the same ask keeps it', () => {
+    const previous = resolveClassification(raw(), ctx(), 'earlier');
+    const fixed = { previous, userAim: 'My aim', userQuestion: 'Top 10?' };
+    const refined = resolveClassification(
+        raw({ move: 'refine' }),
+        ctx(fixed),
+        'now top 5'
+    );
+    assert.equal(
+        refined.drafts.working_question,
+        raw().drafts.working_question
+    );
+    assert.equal(refined.drafts.broad_aim, 'My aim');
+    const same = resolveClassification(raw({ move: 'same' }), ctx(fixed), 'm');
+    assert.equal(same.drafts.working_question, 'Top 10?');
 });
 
 test('computeLevel follows the codebook order', () => {
@@ -838,4 +874,336 @@ test('a multi-part message is answerable when any part is', () => {
     );
     assert.deepEqual(short.parts, ['Sex', 'Age']);
     assert.deepEqual(short.part_answerability, ['unavailable', 'ui']);
+});
+
+test('a page update takes its move from the page and keeps the open study', () => {
+    const previous = resolveClassification(raw(), ctx(), 'earlier');
+    const c = resolveClassification(
+        raw({
+            move: 'new',
+            slots: {
+                ...raw().slots,
+                cohort: slot('specified', 'lung adenocarcinoma', ['luad']),
+                entity: slot('specified', 'KRAS'),
+                measure: slot('specified', 'mutation frequency'),
+            },
+        }),
+        ctx({
+            previous,
+            pageAction: { move: 'refine', filters: 'Sex: Female' },
+            catalog: catalog({ selectedStudies: [STUDIES[2]] }),
+            fixedSlots: {
+                filter: {
+                    status: 'specified',
+                    value: 'Sex: Female',
+                    source: 'page',
+                },
+            },
+        }),
+        'On the page, I narrowed the cohort to Sex: Female. What does this change for my question?'
+    );
+    assert.equal(c.from_page, true);
+    assert.equal(c.move, 'refine');
+    assert.equal(c.open_study_applies, true);
+    assert.equal(c.slots.filter.value, 'Sex: Female');
+    const sections = parseSections(
+        readFileSync(new URL('./guidancePrompt.md', import.meta.url), 'utf-8')
+    );
+    assert.match(
+        guidanceBlock(sections, c, ctx()),
+        /The user changed the page/
+    );
+    const typed = resolveClassification(raw(), ctx(), 'm');
+    assert.equal(typed.from_page, false);
+});
+
+test('a step on the page continues the question and gets its own section', () => {
+    const previous = resolveClassification(raw(), ctx(), 'earlier');
+    const c = resolveClassification(
+        raw({ move: 'new' }),
+        ctx({
+            previous,
+            pageAction: {
+                navigation:
+                    'clicked "Query By Gene" for Lung Adenocarcinoma (TCGA, PanCancer Atlas)',
+            },
+        }),
+        'On the page, I clicked "Query By Gene". What does this mean for my question, and what should I do here?'
+    );
+    assert.equal(c.from_page, true);
+    assert.equal(c.page_navigation, true);
+    assert.equal(c.move, 'same');
+    const sections = parseSections(
+        readFileSync(new URL('./guidancePrompt.md', import.meta.url), 'utf-8')
+    );
+    const block = guidanceBlock(sections, c, ctx());
+    assert.match(block, /The user took a step on the page/);
+    assert.doesNotMatch(block, /The user changed the page/);
+});
+
+test('question suggestions only for an exploring question', () => {
+    const explore = resolveClassification(raw({ goal: 'explore' }), ctx(), 'm');
+    assert.deepEqual(explore.question_suggestions, [
+        'Is A linked to B?',
+        'Does C differ by D?',
+    ]);
+    const describe = resolveClassification(
+        raw({ goal: 'describe' }),
+        ctx(),
+        'm'
+    );
+    assert.deepEqual(describe.question_suggestions, []);
+});
+
+test('a broad type offers its subtypes with studies, at any depth', () => {
+    const lung = {
+        ...LUNG,
+        subtypes: [
+            { id: 'luad', name: 'Lung Adenocarcinoma', ownStudies: 14 },
+            { id: 'nsclc', name: 'Non-Small Cell Lung Cancer', ownStudies: 9 },
+            { id: 'lusc', name: 'Lung Squamous Cell Carcinoma', ownStudies: 6 },
+            { id: 'sclc', name: 'Small Cell Lung Cancer', ownStudies: 4 },
+        ],
+    };
+    assert.deepEqual(separateCohorts(lung), [
+        'Lung Adenocarcinoma',
+        'Non-Small Cell Lung Cancer',
+        'Lung Squamous Cell Carcinoma',
+        'Small Cell Lung Cancer',
+    ]);
+    const c = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot('ambiguous', 'lung cancer', ['lung']),
+                entity: slot('specified', 'all genes'),
+                measure: slot('specified', 'top 5'),
+            },
+        }),
+        ctx({ catalog: catalog({ cancerTypes: [lung, BREAST, BRCA] }) }),
+        'top 5 mutated genes in lung cancer'
+    );
+    assert.equal(c.slots.cohort.status, 'ambiguous');
+    assert.equal(c.slots.cohort.options[0], 'Lung Adenocarcinoma');
+});
+
+test('a matched type inside another matched type is dropped', () => {
+    const lung = {
+        ...LUNG,
+        subtypes: [
+            { id: 'luad', name: 'Lung Adenocarcinoma', ownStudies: 14 },
+            { id: 'sclc', name: 'Small Cell Lung Cancer', ownStudies: 4 },
+        ],
+    };
+    // SCLC's parent (lung neuroendocrine) isn't among the matches; it is
+    // still below "lung".
+    const sclc = {
+        id: 'sclc',
+        name: 'Small Cell Lung Cancer',
+        parent: 'lnet',
+        ownStudies: 4,
+        subtreeStudies: 4,
+        children: [],
+    };
+    const c = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot('ambiguous', 'lung cancer', ['lung', 'sclc']),
+                entity: slot('specified', 'all genes'),
+                measure: slot('specified', 'top 5'),
+            },
+        }),
+        ctx({ catalog: catalog({ cancerTypes: [lung, sclc] }) }),
+        'top 5 mutated genes in lung cancer'
+    );
+    assert.deepEqual(c.slots.cohort.options, [
+        'Lung Adenocarcinoma',
+        'Small Cell Lung Cancer',
+    ]);
+});
+
+test('a type with a few studies of its own but most in subtypes is ambiguous', () => {
+    const lung = {
+        ...LUNG,
+        ownStudies: 2,
+        subtreeStudies: 42,
+        subtypes: [
+            { id: 'luad', name: 'Lung Adenocarcinoma', ownStudies: 20 },
+            { id: 'lusc', name: 'Lung Squamous Cell Carcinoma', ownStudies: 8 },
+            { id: 'lung', name: 'Lung', ownStudies: 2 },
+        ].filter(t => t.id !== 'lung'),
+    };
+    assert.deepEqual(separateCohorts(lung), [
+        'Lung Adenocarcinoma',
+        'Lung Squamous Cell Carcinoma',
+    ]);
+    // Most of the studies are of the type itself: one cohort.
+    assert.deepEqual(
+        separateCohorts({
+            ...BRCA,
+            subtypes: [
+                {
+                    id: 'idc',
+                    name: 'Breast Invasive Ductal Carcinoma',
+                    ownStudies: 4,
+                },
+                {
+                    id: 'ilc',
+                    name: 'Breast Invasive Lobular Carcinoma',
+                    ownStudies: 2,
+                },
+            ],
+        }),
+        []
+    );
+});
+
+test('once the cohort is settled, only its studies count', () => {
+    const luad = {
+        id: 'luad',
+        name: 'Lung Adenocarcinoma',
+        parent: 'nsclc',
+        ownStudies: 20,
+        subtreeStudies: 20,
+        children: [],
+    };
+    const studies = [
+        {
+            studyId: 'luad_tcga_pan_can_atlas_2018',
+            name: 'Lung Adenocarcinoma (TCGA, PanCancer Atlas)',
+            cancerTypeId: 'luad',
+            sampleCount: 566,
+        },
+        {
+            studyId: 'lusc_tcga_pan_can_atlas_2018',
+            name: 'Lung Squamous Cell Carcinoma (TCGA, PanCancer Atlas)',
+            cancerTypeId: 'lusc',
+            sampleCount: 487,
+        },
+    ];
+    const c = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                // The user set the cohort in the box: the message doesn't
+                // name it, so the classifier matched no cancer type.
+                cohort: slot('missing'),
+                study: slot('ambiguous', 'TCGA PanCancer Atlas', [
+                    'luad_tcga_pan_can_atlas_2018',
+                    'lusc_tcga_pan_can_atlas_2018',
+                ]),
+                entity: slot('specified', 'all genes'),
+                measure: slot('specified', 'top 5'),
+            },
+        }),
+        ctx({
+            catalog: catalog({ cancerTypes: [luad], studies }),
+            fixedSlots: {
+                cohort: {
+                    status: 'specified',
+                    value: 'Lung Adenocarcinoma',
+                    source: 'user',
+                },
+            },
+        }),
+        'In the research question box, I set the cohort to Lung Adenocarcinoma.'
+    );
+    assert.equal(c.slots.study.status, 'specified');
+    assert.equal(
+        c.slots.study.value,
+        'Lung Adenocarcinoma (TCGA, PanCancer Atlas)'
+    );
+    assert.equal(c.level, 'L4');
+});
+
+test('several matches offer the subtypes of those that span several cohorts', () => {
+    const nsclc = {
+        id: 'nsclc',
+        name: 'Non-Small Cell Lung Cancer',
+        parent: 'lung',
+        ownStudies: 3,
+        subtreeStudies: 30,
+        children: [],
+        subtypes: [
+            { id: 'luad', name: 'Lung Adenocarcinoma', ownStudies: 20 },
+            { id: 'lusc', name: 'Lung Squamous Cell Carcinoma', ownStudies: 7 },
+        ],
+    };
+    const sclc = {
+        id: 'sclc',
+        name: 'Small Cell Lung Cancer',
+        parent: 'lnet',
+        ownStudies: 4,
+        subtreeStudies: 4,
+        children: [],
+    };
+    const c = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot('ambiguous', 'lung cancer', ['nsclc', 'sclc']),
+                entity: slot('specified', 'all genes'),
+                measure: slot('specified', 'top 5'),
+            },
+        }),
+        ctx({ catalog: catalog({ cancerTypes: [nsclc, sclc] }) }),
+        'top 5 mutated genes in lung cancer'
+    );
+    assert.deepEqual(c.slots.cohort.options, [
+        'Lung Adenocarcinoma',
+        'Lung Squamous Cell Carcinoma',
+        'Small Cell Lung Cancer',
+    ]);
+});
+
+test('an ambiguous slot with one option is that option', () => {
+    const luad = {
+        id: 'luad',
+        name: 'Lung Adenocarcinoma',
+        parent: 'nsclc',
+        ownStudies: 20,
+        subtreeStudies: 20,
+        children: [],
+    };
+    // The classifier corrected a typo, matched no id, and called the slot
+    // ambiguous with the one option.
+    const c = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                cohort: slot(
+                    'ambiguous',
+                    'lung adenocarcinoma',
+                    [],
+                    ['Lung Adenocarcinoma']
+                ),
+                entity: slot('specified', 'all genes'),
+                measure: slot('specified', 'top 5'),
+            },
+        }),
+        ctx({ catalog: catalog({ cancerTypes: [luad] }) }),
+        'what about adecarcinoma?'
+    );
+    assert.equal(c.slots.cohort.status, 'specified');
+    assert.equal(c.slots.cohort.value, 'Lung Adenocarcinoma');
+    // A study with one option too.
+    const s = resolveClassification(
+        raw({
+            slots: {
+                ...raw().slots,
+                study: slot(
+                    'ambiguous',
+                    'TCGA',
+                    [],
+                    [
+                        'Lung Adenocarcinoma (TCGA, PanCancer Atlas) [luad_tcga_pan_can_atlas_2018]',
+                    ]
+                ),
+            },
+        }),
+        ctx(),
+        'm'
+    );
+    assert.equal(s.slots.study.status, 'specified');
 });

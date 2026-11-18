@@ -165,3 +165,16 @@ test('slot edits: a chosen study opens it, an unsettled study goes home', () => 
         { kind: 'home' }
     );
 });
+
+test('a loose study value opens the one study it matches in the cohort', () => {
+    const s = slots({
+        cohort: ['specified', 'Lung Adenocarcinoma'],
+        study: ['specified', 'TCGA PanCancer Atlas'],
+    });
+    assert.deepEqual(targetForSlots(s, STUDIES, elsewhere, CATALOG), {
+        kind: 'study',
+        studyId: 'luad_tcga_pan_can_atlas_2018',
+    });
+    // Without the catalog it can't be resolved: stay.
+    assert.equal(targetForSlots(s, STUDIES, elsewhere), null);
+});

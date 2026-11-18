@@ -99,3 +99,35 @@ test('filterKeysFromHref lists Study View filters by id', () => {
         null
     );
 });
+
+test('home page: the ticked studies are the study', () => {
+    const id = CATALOG.studies[0].studyId;
+    assert.deepEqual(
+        slotsFromPage(
+            'https://x.org/',
+            {
+                pageType: 'studySelection',
+                selectedStudyIds: [id],
+            },
+            CATALOG
+        ),
+        { study: CATALOG.studies[0].name }
+    );
+    assert.deepEqual(
+        slotsFromPage('https://x.org/', {
+            pageType: 'studySelection',
+            selectedStudyIds: [],
+        }),
+        {}
+    );
+});
+
+test('Group Comparison: its groups are the groups', () => {
+    assert.deepEqual(
+        slotsFromPage('https://x.org/comparison?comparisonId=1', {
+            pageType: 'groupComparison',
+            groups: [{ name: 'Female' }, { name: 'Male' }],
+        }),
+        { groups: 'Female vs Male' }
+    );
+});

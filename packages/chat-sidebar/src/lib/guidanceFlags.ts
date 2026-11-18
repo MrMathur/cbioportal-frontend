@@ -42,3 +42,17 @@ export const guidanceSessionId = guidanceEnabled ? readSessionId() : '';
 // own localStorage (chat-sidebar:participant).
 export const guidanceParticipant =
     new URLSearchParams(window.location.search).get('participant') ?? '';
+
+// The chat answers filter changes the user makes on the page (on unless the
+// portal's localStorage has chat-sidebar:pageUpdates = '0', passed on by the
+// host, or the iframe's own localStorage does).
+export const pageUpdatesEnabled =
+    guidanceEnabled &&
+    new URLSearchParams(window.location.search).get('pageUpdates') !== '0' &&
+    (() => {
+        try {
+            return localStorage.getItem('chat-sidebar:pageUpdates') !== '0';
+        } catch {
+            return true;
+        }
+    })();

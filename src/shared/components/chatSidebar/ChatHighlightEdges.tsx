@@ -38,7 +38,12 @@ function findHidden(annotations: readonly HighlightAnnotation[]): Hidden[] {
     return hidden;
 }
 
-const EdgeButton: React.FunctionComponent<{ item: Hidden }> = ({ item }) => {
+// One badge's button; with a count, the shared button of several, which
+// scrolls to the nearest of them (each click brings the next into view).
+const EdgeButton: React.FunctionComponent<{ item: Hidden; count?: number }> = ({
+    item,
+    count,
+}) => {
     const { annotation, direction, key } = item;
     const name =
         annotation.cue === 'result'
@@ -48,8 +53,16 @@ const EdgeButton: React.FunctionComponent<{ item: Hidden }> = ({ item }) => {
         <button
             type="button"
             className="chat-highlight-edge-button"
-            title={`${name}: ${annotation.reason}`}
-            aria-label={`Scroll to ${name.toLowerCase()}: ${annotation.reason}`}
+            title={
+                count
+                    ? `${count} badges ${direction}: scroll to the nearest`
+                    : `${name}: ${annotation.reason}`
+            }
+            aria-label={
+                count
+                    ? `${count} answer badges ${direction}: scroll to the nearest`
+                    : `Scroll to ${name.toLowerCase()}: ${annotation.reason}`
+            }
             onClick={() => {
                 scrollToHighlight(key);
                 emphasizeHighlight(key);
@@ -69,7 +82,37 @@ const EdgeButton: React.FunctionComponent<{ item: Hidden }> = ({ item }) => {
                     <i className="fa fa-arrow-right" />
                 )}
             </span>
+            {count && count > 1 && <span>+{count - 1}</span>}
         </button>
+    );
+};
+
+// Up to this many off-screen badges get a button each; more share one
+// button that steps through them, so they don't cover the page's controls.
+const MAX_SEPARATE = 2;
+
+const EdgeGroup: React.FunctionComponent<{
+    items: Hidden[];
+    direction: 'above' | 'below';
+}> = ({ items, direction }) => {
+    if (items.length === 0) return null;
+    const label =
+        direction === 'above' ? 'Answer badges above' : 'Answer badges below';
+    return (
+        <div
+            className={`chat-highlight-edge chat-highlight-edge-${direction}`}
+            role="group"
+            aria-label={label}
+        >
+            {items.length <= MAX_SEPARATE ? (
+                items.map(item => <EdgeButton key={item.key} item={item} />)
+            ) : (
+                <EdgeButton
+                    item={items[direction === 'above' ? items.length - 1 : 0]}
+                    count={items.length}
+                />
+            )}
+        </div>
     );
 };
 
@@ -110,28 +153,8 @@ export const ChatHighlightEdges: React.FunctionComponent = observer(() => {
     const below = hidden.filter(h => h.direction === 'below');
     return (
         <>
-            {above.length > 0 && (
-                <div
-                    className="chat-highlight-edge chat-highlight-edge-above"
-                    role="group"
-                    aria-label="Answer badges above"
-                >
-                    {above.map(item => (
-                        <EdgeButton key={item.key} item={item} />
-                    ))}
-                </div>
-            )}
-            {below.length > 0 && (
-                <div
-                    className="chat-highlight-edge chat-highlight-edge-below"
-                    role="group"
-                    aria-label="Answer badges below"
-                >
-                    {below.map(item => (
-                        <EdgeButton key={item.key} item={item} />
-                    ))}
-                </div>
-            )}
+            <EdgeGroup items={above} direction="above" />
+            <EdgeGroup items={below} direction="below" />
         </>
     );
 });

@@ -86,6 +86,8 @@ interface StudySelectionDetails {
     available: true;
     pageType: 'studySelection';
     selectedStudyIds: string[];
+    // 'genes' once "Query By Gene" shows the gene form for the selection.
+    step: 'studies' | 'genes';
     // Every study in the list; the chat server narrows these to the question.
     highlightCandidates: HighlightCandidate[];
 }
@@ -153,6 +155,10 @@ function getStudySelectionDetails(store: QueryStore): StudySelectionDetails {
         available: true,
         pageType: 'studySelection',
         selectedStudyIds: store.selectableSelectedStudyIds,
+        // The gene box registers itself only while the gene form is shown.
+        step: getRegisteredControls().includes('gene-query')
+            ? 'genes'
+            : 'studies',
         highlightCandidates: [
             ...getControlCandidates(),
             ...store.selectableStudies.map(study => ({

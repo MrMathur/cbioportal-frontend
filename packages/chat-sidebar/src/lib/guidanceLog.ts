@@ -19,7 +19,9 @@ export type GuidanceEvent =
     | 'badge_plan'
     | 'badge_mismatch'
     | 'badge_click'
-    | 'part_select';
+    | 'part_select'
+    | 'page_update_sent'
+    | 'slot_answer_sent';
 
 export function logGuidanceEvent(
     event: GuidanceEvent,

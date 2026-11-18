@@ -48,11 +48,18 @@ export interface Classification {
     // Whether the study open on the page fits the question (its study and
     // filters count as fixed).
     open_study_applies?: boolean;
+    // The message reported a change the user made on the page: a filter
+    // change, or (page_navigation) another step such as ticking studies or
+    // opening a page.
+    from_page?: boolean;
+    page_navigation?: boolean;
     drafts: {
         broad_aim: string;
         working_question: string;
         concrete_analysis: string;
     };
+    // For an exploring question: working questions the user may pick.
+    question_suggestions?: string[];
     rationale: string;
     checks: string[];
     message: string;

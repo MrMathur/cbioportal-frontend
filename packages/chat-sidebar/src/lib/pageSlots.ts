@@ -97,10 +97,27 @@ export function slotsFromPage(
     studyContext?: StudyContext
 ): PageSlots {
     const kind = pageKind(href);
-    if (kind === 'other') return {};
+    // The home page's study list: the studies ticked there.
+    const ticked =
+        details.pageType === 'studySelection' &&
+        Array.isArray(details.selectedStudyIds)
+            ? details.selectedStudyIds.filter(
+                  (id): id is string => typeof id === 'string'
+              )
+            : [];
+    // Group Comparison: the groups compared.
+    if (details.pageType === 'groupComparison') {
+        const names = Array.isArray(details.groups)
+            ? details.groups
+                  .map(g => (g as { name?: unknown } | null)?.name)
+                  .filter((n): n is string => typeof n === 'string')
+            : [];
+        return names.length >= 2 ? { groups: names.join(' vs ') } : {};
+    }
+    if (kind === 'other' && ticked.length === 0) return {};
     const slots: PageSlots = {};
 
-    const studyIds = studyIdsFromHref(href);
+    const studyIds = kind === 'other' ? ticked : studyIdsFromHref(href);
     if (studyIds.length > 0) {
         const names = studyIds.map(
             id => catalog?.studies.find(s => s.studyId === id)?.name ?? id

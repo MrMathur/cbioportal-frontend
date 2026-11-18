@@ -13,8 +13,13 @@ export interface QuestionEntry {
     // (Study View filters), recorded as a step of the current topic.
     kind?: 'question' | 'page';
     // For a page change: the filters before it (filterKeysFromHref), so a
-    // burst of clicks is judged as one change.
+    // burst of clicks is judged as one change, and what the page filters on
+    // after it ("Sex: Female; ...", empty when none).
     pageBaseline?: string[];
+    pageFilters?: string;
+    // For any other step on the page (studies ticked, the gene form opened,
+    // another page opened), what the user did, worded to follow "I".
+    pageNavigation?: string;
     text: string;
     move: QuestionMove;
     requestType: Classification['request_type'];
@@ -290,6 +295,7 @@ export function addPageAction(
         kind: 'page',
         pageBaseline: baseline,
         text: describePageAction(move, action.filterText),
+        pageFilters: action.filterText,
         move,
         requestType: 'data',
         level: null,
@@ -311,4 +317,112 @@ export function addPageAction(
         ],
         entry,
     };
+}
+
+export interface PageNavigation {
+    // What the user did, worded to follow "I" (pageNavigation.ts).
+    did: string;
+    aim: string;
+    question: string;
+    goal: Classification['goal'];
+    slots: Slots;
+    href: string;
+}
+
+function capitalize(text: string): string {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * Records a step the user took on the page other than a filter change as a
+ * step of the current topic. A step within PAGE_ACTION_WINDOW_MS of the
+ * previous one of its kind replaces it, so ticking studies one by one is one
+ * step. Returns the topics unchanged when there is no topic to add to.
+ */
+export function addPageNavigation(
+    topics: readonly Topic[],
+    navigation: PageNavigation,
+    now: Date = new Date()
+): { topics: Topic[]; entry?: QuestionEntry } {
+    const current = topics[0];
+    if (!current) return { topics: [...topics] };
+    const questions = [...current.questions];
+    const last = questions[questions.length - 1];
+    const merging =
+        last?.kind === 'page' &&
+        last.pageNavigation !== undefined &&
+        now.getTime() - new Date(last.at).getTime() <= PAGE_ACTION_WINDOW_MS;
+    if (merging) questions.pop();
+    const entry: QuestionEntry = {
+        id: merging ? last.id : newId(),
+        at: now.toISOString(),
+        kind: 'page',
+        pageNavigation: navigation.did,
+        text: capitalize(navigation.did),
+        move: 'same',
+        requestType: 'data',
+        level: null,
+        goal: navigation.goal,
+        aim: navigation.aim,
+        question: navigation.question,
+        slots: navigation.slots,
+        href: navigation.href,
+    };
+    questions.push(entry);
+    return {
+        topics: [
+            {
+                ...current,
+                updatedAt: entry.at,
+                questions: questions.slice(-MAX_QUESTIONS_PER_TOPIC),
+            },
+            ...topics.slice(1),
+        ],
+        entry,
+    };
+}
+
+// How the chat words a change the user made on the page, as the
+// message the sidebar sends on their behalf so the assistant updates its
+// answer. Recognised by its opening (isPageUpdateMessage).
+export const PAGE_UPDATE_PREFIX = 'On the page, I ';
+
+export function pageUpdateMessage(entry: QuestionEntry): string | undefined {
+    if (entry.kind !== 'page') return undefined;
+    if (entry.pageNavigation) {
+        return `${PAGE_UPDATE_PREFIX}${entry.pageNavigation}. What does this mean for my question, and what should I do here?`;
+    }
+    const filters = entry.pageFilters ?? '';
+    const change =
+        entry.move === 'refine'
+            ? `narrowed the cohort to ${filters}`
+            : entry.move === 'broaden'
+            ? filters
+                ? `widened the cohort to ${filters}`
+                : 'removed the filters'
+            : entry.move === 'sibling'
+            ? filters
+                ? `changed the filters to ${filters}`
+                : 'changed the filters'
+            : undefined;
+    if (!change) return undefined;
+    return `${PAGE_UPDATE_PREFIX}${change}. What does this change for my question?`;
+}
+
+export function isPageUpdateMessage(text: string): boolean {
+    return text.trimStart().startsWith(PAGE_UPDATE_PREFIX);
+}
+
+/** Applies a change to the latest page step of the latest topic. */
+export function updateLatestPageStep(
+    topics: readonly Topic[],
+    patch: Partial<Pick<QuestionEntry, 'finding'>>
+): Topic[] {
+    const current = topics[0];
+    if (!current) return [...topics];
+    const questions = [...current.questions];
+    const index = questions.map(q => q.kind).lastIndexOf('page');
+    if (index < 0) return [...topics];
+    questions[index] = { ...questions[index], ...patch };
+    return [{ ...current, questions }, ...topics.slice(1)];
 }

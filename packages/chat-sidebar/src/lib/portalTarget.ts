@@ -1,4 +1,4 @@
-import { CatalogStudy } from './catalogMatch';
+import { Catalog, CatalogStudy, resolveStudyText } from './catalogMatch';
 import { Classification, Slots } from './classification';
 import { studyIdsFromHref } from './pageStudies';
 
@@ -51,14 +51,35 @@ function isOnStudy(href: string | undefined, studyId: string): boolean {
     }
 }
 
+// The study a slot names: exactly, or, for looser words ("TCGA PanCancer
+// Atlas"), the one study they match within the cohort chosen.
+function slotStudyId(
+    slots: Slots,
+    studies: readonly CatalogStudy[],
+    catalog: Catalog | undefined
+): string | undefined {
+    const value = slots.study.value;
+    const exact = studyIdFromValue(value, studies);
+    if (exact || !catalog || !value) return exact;
+    const cohort =
+        slots.cohort.status === 'specified'
+            ? slots.cohort.value ?? undefined
+            : undefined;
+    return studyIdFromValue(
+        resolveStudyText(catalog, value, cohort) ?? null,
+        studies
+    );
+}
+
 function fromSlots(
     slots: Slots,
     studies: readonly CatalogStudy[],
-    current: CurrentPage
+    current: CurrentPage,
+    catalog?: Catalog
 ): PortalTarget | null {
     const study = slots.study;
     if (study.status === 'specified') {
-        const studyId = studyIdFromValue(study.value, studies);
+        const studyId = slotStudyId(slots, studies, catalog);
         if (!studyId) return null;
         return isOnStudy(current.href, studyId)
             ? null
@@ -70,29 +91,33 @@ function fromSlots(
 /**
  * Where a classified message should take the portal, or null to stay. At L4
  * the reply opens the exact view itself; when the open page fits the
- * question, the user stays on it.
+ * question, or the message reports the user's own step on the page, the user
+ * stays where they are.
  */
 export function targetForClassification(
     c: Classification,
     studies: readonly CatalogStudy[],
-    current: CurrentPage
+    current: CurrentPage,
+    catalog?: Catalog
 ): PortalTarget | null {
     if (c.request_type !== 'data' && c.request_type !== 'catalog') return null;
-    if (c.open_study_applies) return null;
+    // The reply to a change the user made on the page leaves them there.
+    if (c.from_page || c.open_study_applies) return null;
     if (c.request_type === 'catalog') {
         return isHome(current) ? null : { kind: 'home' };
     }
     if (c.level === 'L4') return null;
-    return fromSlots(c.slots, studies, current);
+    return fromSlots(c.slots, studies, current, catalog);
 }
 
 /** Where the portal should go after the user edited the slots in the box. */
 export function targetForSlots(
     slots: Slots,
     studies: readonly CatalogStudy[],
-    current: CurrentPage
+    current: CurrentPage,
+    catalog?: Catalog
 ): PortalTarget | null {
-    return fromSlots(slots, studies, current);
+    return fromSlots(slots, studies, current, catalog);
 }
 
 export function pathFor(target: PortalTarget): string {

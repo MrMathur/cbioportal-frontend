@@ -8,6 +8,7 @@ import {
 import { getFixedForRequest } from './researchQuestion';
 import { getLatestPageEvents } from './page-events';
 import { markableTargets, pageTypeOf } from './pageTargets';
+import { pageUpdateFor } from './pageUpdates';
 
 // What the guided assistant adds to each chat request: the portal catalog
 // entries the message may refer to, and what the user or page has fixed, for
@@ -47,5 +48,7 @@ export async function buildGuidancePayload(
         // What the reply may mark on the open page (set_highlights).
         pageType: pageTypeOf(getLatestPageEvents().settledSnapshot),
         pageTargets: markableTargets(getLatestPageEvents().settledSnapshot),
+        // Set when the message reports a filter change made on the page.
+        pageAction: text ? pageUpdateFor(text) : undefined,
     };
 }

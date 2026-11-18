@@ -60,6 +60,7 @@ const GUIDANCE_STORAGE_KEY = 'chat-sidebar:guidance';
 const GUIDANCE_DEBUG_STORAGE_KEY = 'chat-sidebar:guidanceDebug';
 // A user-study participant code, written to the guidance log.
 const PARTICIPANT_STORAGE_KEY = 'chat-sidebar:participant';
+const PAGE_UPDATES_STORAGE_KEY = 'chat-sidebar:pageUpdates';
 
 function readFlag(key: string): boolean {
     try {
@@ -440,6 +441,14 @@ export default class ChatSidebar extends React.Component<{}, {}> {
         if (readFlag(GUIDANCE_STORAGE_KEY)) params.set('guidance', '1');
         if (readFlag(GUIDANCE_DEBUG_STORAGE_KEY)) {
             params.set('guidanceDebug', '1');
+        }
+        // The chat answers filter changes made on the page unless this is '0'.
+        try {
+            if (localStorage.getItem(PAGE_UPDATES_STORAGE_KEY) === '0') {
+                params.set('pageUpdates', '0');
+            }
+        } catch {
+            /* on by default */
         }
         try {
             const participant = localStorage.getItem(PARTICIPANT_STORAGE_KEY);

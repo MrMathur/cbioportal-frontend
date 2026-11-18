@@ -94,7 +94,7 @@ const QuestionRow: FC<{
                 MOVE_STYLES[entry.move]
             )}
         >
-            {MOVE_LABELS[entry.move]}
+            {entry.pageNavigation ? 'page' : MOVE_LABELS[entry.move]}
         </span>
         <div className="min-w-0 flex-1">
             <p
@@ -276,7 +276,7 @@ export const EarlierQuestions: FC = () => {
         const path = restorePath(entry.href);
         if (path) {
             expectPageNavigation();
-            markNavigationStarted(current);
+            markNavigationStarted(current, path);
             notifyNavigate(path);
         }
     };

@@ -18,6 +18,7 @@ import { ChatHeader } from '@/components/ChatHeader';
 import { ResearchQuestionBar } from '@/components/ResearchQuestionBar';
 import { EarlierQuestions } from '@/components/EarlierQuestions';
 import { BadgePlanSync } from '@/components/BadgePlanSync';
+import { PageActionResponder } from '@/components/PageActionResponder';
 import { guidanceEnabled } from '@/lib/guidanceFlags';
 import { SidebarRail } from '@/components/SidebarRail';
 import { useCrossTabSync } from '@/hooks/use-cross-tab-sync';
@@ -221,6 +222,7 @@ export function App() {
                             <ResearchQuestionBar />
                             {guidanceEnabled && <EarlierQuestions />}
                             {guidanceEnabled && <BadgePlanSync />}
+                            {guidanceEnabled && <PageActionResponder />}
                             <div className="min-h-0 flex-1">
                                 <Thread components={THREAD_COMPONENTS} />
                             </div>

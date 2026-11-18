@@ -114,7 +114,8 @@ export function useChatThreadRuntime(): AssistantRuntime {
                 if (path) {
                     expectPageNavigation();
                     markNavigationStarted(
-                        getLatestPageEvents().settledSnapshot?.href
+                        getLatestPageEvents().settledSnapshot?.href,
+                        path
                     );
                     notifyNavigate(path);
                 }

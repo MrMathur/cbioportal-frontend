@@ -9,7 +9,11 @@ import {
 } from './classification';
 import { templateQuestion } from './researchTemplate';
 import {
+    isPageUpdateMessage,
+    pageUpdateMessage,
+    updateLatestPageStep,
     addPageAction,
+    addPageNavigation,
     addQuestion,
     pageActionMove,
     PAGE_ACTION_WINDOW_MS,
@@ -293,4 +297,81 @@ test('findings attach to the question, not a later page step', () => {
     const updated = updateLatestQuestion(topics, { finding: 'Found.' });
     assert.equal(updated[0].questions[0].finding, 'Found.');
     assert.equal(updated[0].questions[1].finding, undefined);
+});
+
+test('a page step becomes the message the chat sends for it', () => {
+    let { topics } = addQuestion([], classification('q', null), undefined);
+    const refined = addPageAction(
+        topics,
+        pageAction([], ['clinical:SEX=Female'], 'Sex: Female')
+    );
+    const message = pageUpdateMessage(refined.entry!);
+    assert.equal(
+        message,
+        'On the page, I narrowed the cohort to Sex: Female. What does this change for my question?'
+    );
+    assert.ok(isPageUpdateMessage(message!));
+    assert.ok(!isPageUpdateMessage('What about the page?'));
+    const removed = addPageAction(
+        refined.topics,
+        pageAction(['clinical:SEX=Female'], [], ''),
+        new Date(Date.now() + PAGE_ACTION_WINDOW_MS + 5_000)
+    );
+    assert.match(pageUpdateMessage(removed.entry!)!, /I removed the filters\./);
+    assert.equal(pageUpdateMessage(topics[0].questions[0]), undefined);
+    // A finding for the page step's reply goes on the step.
+    topics = updateLatestPageStep(removed.topics, {
+        finding: 'Now 42% female.',
+    });
+    assert.equal(topics[0].questions.at(-1)?.finding, 'Now 42% female.');
+    assert.equal(topics[0].questions[0].finding, undefined);
+});
+
+test('a step on the page joins the topic; quick steps merge into one', () => {
+    const t0 = new Date('2026-11-05T10:00:00Z');
+    const { topics } = addQuestion(
+        [],
+        classification('top genes in LUAD', null),
+        undefined,
+        t0
+    );
+    const step = (did: string, at: number) =>
+        addPageNavigation(
+            topics,
+            {
+                did,
+                aim: 'aim',
+                question: 'q',
+                goal: 'describe',
+                slots: emptySlots(),
+                href: 'https://x.org/',
+            },
+            new Date(t0.getTime() + at)
+        );
+    const first = step('selected the study LUAD in the study list', 60_000);
+    assert.equal(first.entry?.move, 'same');
+    assert.equal(
+        first.entry?.text,
+        'Selected the study LUAD in the study list'
+    );
+    assert.equal(
+        pageUpdateMessage(first.entry!),
+        'On the page, I selected the study LUAD in the study list. What does this mean for my question, and what should I do here?'
+    );
+    assert.equal(isPageUpdateMessage(pageUpdateMessage(first.entry!)!), true);
+    const second = addPageNavigation(
+        first.topics,
+        {
+            did: 'clicked "Query By Gene" for LUAD',
+            aim: 'aim',
+            question: 'q',
+            goal: 'describe',
+            slots: emptySlots(),
+            href: 'https://x.org/',
+        },
+        new Date(t0.getTime() + 65_000)
+    );
+    assert.equal(second.entry?.id, first.entry?.id);
+    assert.equal(second.topics[0].questions.length, 2);
+    assert.equal(addPageNavigation([], {} as never).entry, undefined);
 });

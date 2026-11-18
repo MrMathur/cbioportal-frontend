@@ -36,6 +36,12 @@ export const CLIENT_EVENTS = [
     'badge_mismatch',
     'badge_click',
     'part_select',
+    // The sidebar told the chat about a filter change the user made on the
+    // page, so the assistant updates its answer.
+    'page_update_sent',
+    // The user answered the chat by filling a slot in the research question
+    // box, and the sidebar sent that answer to the chat.
+    'slot_answer_sent',
 ] as const;
 
 export type ClientEvent = typeof CLIENT_EVENTS[number];

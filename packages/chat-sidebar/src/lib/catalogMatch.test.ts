@@ -106,3 +106,70 @@ test('studyIdsFromHref reads study, results and patient pages', () => {
     );
     assert.deepEqual(studyIdsFromHref('https://www.cbioportal.org/'), []);
 });
+
+test('subtypes list every type below with studies of its own', () => {
+    const lung = matchCatalog(CATALOG, 'lung cancer').cancerTypes.find(
+        t => t.id === 'lung'
+    );
+    assert.deepEqual(
+        lung?.subtypes.map(t => t.id),
+        ['luad', 'lusc', 'sclc']
+    );
+    assert.equal(lung?.subtypes[0].ownStudies, 2);
+});
+
+test('searchStudies and resolveStudyText find studies by the words typed', async () => {
+    const { searchStudies, resolveStudyText } = await import('./catalogMatch');
+    assert.deepEqual(
+        searchStudies(CATALOG, 'lung tcga').map(s => s.studyId),
+        ['luad_tcga_pan_can_atlas_2018', 'lusc_tcga_pan_can_atlas_2018']
+    );
+    assert.equal(
+        resolveStudyText(CATALOG, 'adenocarcinoma pancancer'),
+        'Lung Adenocarcinoma (TCGA, PanCancer Atlas) [luad_tcga_pan_can_atlas_2018]'
+    );
+    assert.equal(
+        resolveStudyText(CATALOG, 'luad_broad'),
+        'Lung Adenocarcinoma (Broad, Cell 2012) [luad_broad]'
+    );
+    // Several matches: left for the chat to settle.
+    assert.equal(resolveStudyText(CATALOG, 'lung'), undefined);
+});
+
+test('study search looks within the chosen cohort first', async () => {
+    const { searchStudies, resolveStudyText } = await import('./catalogMatch');
+    // "pancancer" alone matches lung and breast studies.
+    assert.equal(searchStudies(CATALOG, 'pancancer').length, 3);
+    assert.deepEqual(
+        searchStudies(CATALOG, 'pancancer', 'Lung Adenocarcinoma').map(
+            s => s.studyId
+        ),
+        ['luad_tcga_pan_can_atlas_2018']
+    );
+    assert.equal(
+        resolveStudyText(CATALOG, 'pancancer', 'Lung Adenocarcinoma'),
+        'Lung Adenocarcinoma (TCGA, PanCancer Atlas) [luad_tcga_pan_can_atlas_2018]'
+    );
+    // A cohort with no matching study falls back to every study.
+    assert.equal(
+        searchStudies(CATALOG, 'metabric', 'Lung Adenocarcinoma')[0].studyId,
+        'brca_metabric'
+    );
+});
+
+test('a loose cohort ("lung cancer") narrows the study search too', async () => {
+    const { resolveStudyText } = await import('./catalogMatch');
+    assert.equal(
+        resolveStudyText(CATALOG, 'adenocarcinoma pancancer', 'lung cancer'),
+        'Lung Adenocarcinoma (TCGA, PanCancer Atlas) [luad_tcga_pan_can_atlas_2018]'
+    );
+});
+
+test('a typo in a long word still finds the cancer type', async () => {
+    const { hasWord } = await import('./catalogMatch');
+    assert.ok(hasWord(new Set(['adecarcinoma']), 'adenocarcinoma'));
+    assert.ok(!hasWord(new Set(['lung']), 'lunge'));
+    assert.ok(!hasWord(new Set(['carcinoma']), 'adenocarcinoma'));
+    const matches = matchCatalog(CATALOG, 'what about lung adecarcinoma?');
+    assert.ok(matches.cancerTypes.some(t => t.id === 'luad'));
+});
