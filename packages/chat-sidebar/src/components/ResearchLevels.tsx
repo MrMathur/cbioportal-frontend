@@ -484,7 +484,7 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
                     <LevelIcon
                         icon={SlidersHorizontalIcon}
                         label="Concrete analysis"
-                        hint="The parts of the analysis. Yellow parts with ? need your answer; dashed ones are optional. Click one to set it."
+                        hint="The parts of the analysis. Yellow parts with ? need your answer; dashed ones are optional. An icon shows where each part came from: a speech bubble for the chat, a pointer for your clicks on the page, a pencil for your edits here. Click one to set it."
                     />
                     <div className="flex min-w-0 flex-1 flex-wrap gap-1">
                         {SLOT_NAMES.map(name => (

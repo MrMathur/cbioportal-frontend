@@ -153,7 +153,7 @@ export function formatMarkTargets(
     const list = targets.length
         ? targets.map(line).join('\n')
         : "(none: don't call `set_highlights` unless `go_to_page` returns elements)";
-    return `### Elements you can mark (\`target\` | label | details)\n\n${where}:\n\n${list}\n\n### Tabs on other pages (for a next step, or results shown once the user gets there)\n\n${OTHER_PAGE_TABS.map(
+    return `### Elements you can mark (\`target\` | label | details)\n\n${where}:\n\n${list}\n\n### Tabs on other pages (for results shown once the user gets there; never for the next step, which goes on this page)\n\n${OTHER_PAGE_TABS.map(
         line
     ).join('\n')}`;
 }

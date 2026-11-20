@@ -28,13 +28,17 @@ function TooltipContent({
     sideOffset = 4,
     align = 'center',
     alignOffset = 0,
+    passThrough = false,
     children,
     ...props
 }: TooltipPrimitive.Popup.Props &
     Pick<
         TooltipPrimitive.Positioner.Props,
         'align' | 'alignOffset' | 'side' | 'sideOffset'
-    >) {
+    > & {
+        // The pointer goes through the tooltip to what it covers.
+        passThrough?: boolean;
+    }) {
     return (
         <TooltipPrimitive.Portal>
             <TooltipPrimitive.Positioner
@@ -42,7 +46,10 @@ function TooltipContent({
                 alignOffset={alignOffset}
                 side={side}
                 sideOffset={sideOffset}
-                className="isolate z-50"
+                className={cn(
+                    'isolate z-50',
+                    passThrough && 'pointer-events-none'
+                )}
             >
                 <TooltipPrimitive.Popup
                     data-slot="tooltip-content"

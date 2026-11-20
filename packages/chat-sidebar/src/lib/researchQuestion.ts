@@ -714,17 +714,36 @@ let slotsBeforePage: Partial<Record<SlotName, Slot>> = {};
  * it; a page slot is cleared once the page no longer sets it.
  */
 export function setPageSlots(
-    pageSlots: Partial<Record<SlotName, string>>
+    pageSlots: Partial<Record<SlotName, string>>,
+    href: string
 ): void {
     if (!guidanceEnabled) return;
     latestPageSlots = pageSlots;
+    latestPageHref = href;
     applyPageSlots();
+}
+
+// The page the sidebar itself last took the portal to. Its slots come from the
+// chat (it followed the question), not from the user's clicks on the page.
+let latestPageHref = '';
+let chatLandingHref: string | undefined;
+
+function pageSlotSource(): 'chat' | 'page' {
+    if (
+        latestPageHref &&
+        latestPageHref !== lastPage?.href &&
+        Date.now() - expectedNavigationAt < EXPECTED_NAVIGATION_MS
+    ) {
+        chatLandingHref = latestPageHref;
+    }
+    return latestPageHref === chatLandingHref ? 'chat' : 'page';
 }
 
 function applyPageSlots(): void {
     const state = active;
     let changed = false;
     const slots: Slots = { ...state.slots };
+    const source = pageSlotSource();
     for (const name of SLOT_NAMES) {
         const value = latestPageSlots[name];
         const current = slots[name];
@@ -744,7 +763,7 @@ function applyPageSlots(): void {
                 status: 'specified',
                 value,
                 options: [],
-                source: 'page',
+                source,
             };
             changed = true;
         } else if (current.source === 'page') {

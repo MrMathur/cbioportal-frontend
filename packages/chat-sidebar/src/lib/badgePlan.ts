@@ -19,8 +19,8 @@ export interface PlanMark {
     tooltip: string;
     // A part of a multi-part answer, or 'shared'.
     part: string;
-    // On a page the user isn't on yet (a tab of Results View or Group
-    // Comparison); shown once they get there.
+    // A result on a page the user isn't on yet (a tab of Results View or
+    // Group Comparison); shown once they get there.
     elsewhere?: boolean;
 }
 
@@ -171,6 +171,16 @@ export function buildPlan(
         if (cue === 'next_step') {
             if (hasNext) {
                 rejected.push({ target, reason: 'only one next-step mark' });
+                continue;
+            }
+            // The next step's badge must be where the user is, so its chip
+            // in the text has something to point at.
+            if (!onPage.has(target)) {
+                rejected.push({
+                    target,
+                    reason:
+                        'not on this page: mark the element on this page that leads there (e.g. the gene query box or a Compare control), or write the next step as a question with no mark',
+                });
                 continue;
             }
             hasNext = true;

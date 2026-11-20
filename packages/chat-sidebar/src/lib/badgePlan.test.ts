@@ -126,9 +126,12 @@ test('buildPlan allows tabs of other pages and caps results at five', () => {
         []
     );
     assert.equal(plan.marks.filter(m => m.cue === 'result').length, 5);
-    assert.equal(rejected.length, 2);
-    const next = plan.marks.find(m => m.cue === 'next_step');
-    assert.equal(next?.elsewhere, true);
+    // The sixth result, and the next step on a page the user isn't on.
+    assert.equal(rejected.length, 3);
+    assert.equal(
+        plan.marks.find(m => m.cue === 'next_step'),
+        undefined
+    );
 });
 
 test('context needs the cohort summary on the page', () => {
@@ -274,5 +277,24 @@ test('contextTooltip leaves out a cohort the study name repeats', () => {
     assert.equal(
         contextTooltip(slots),
         'Lung Adenocarcinoma (TCGA, PanCancer Atlas)'
+    );
+});
+
+test('a result may sit on another page, the next step may not', () => {
+    const { plan } = buildPlan(
+        [
+            { cue: 'result', target: 'comparison-tab:survival', tooltip: 'r' },
+            {
+                cue: 'next_step',
+                target: 'results-tab:mutations',
+                tooltip: 'n',
+            },
+        ],
+        candidates,
+        []
+    );
+    assert.deepEqual(
+        plan.marks.map(m => [m.cue, m.elsewhere]),
+        [['result', true]]
     );
 });

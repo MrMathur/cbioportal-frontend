@@ -1,5 +1,13 @@
 import { FC, FormEvent, useState } from 'react';
-import { CircleHelpIcon, PlusIcon, SparklesIcon, XIcon } from 'lucide-react';
+import {
+    CircleHelpIcon,
+    MessageCircleIcon,
+    MousePointerClickIcon,
+    PencilIcon,
+    PlusIcon,
+    SparklesIcon,
+    XIcon,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
     Popover,
@@ -13,6 +21,12 @@ import {
     searchStudies,
     studyLabel,
 } from '@/lib/catalogMatch';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 // One slot of the concrete analysis. Specified slots show their value;
@@ -43,6 +57,23 @@ const SOURCE_LABELS: Record<Slot['source'], string> = {
     chat: 'from your message',
     user: 'set by you',
     page: 'from the page',
+};
+
+// Shown when hovering a filled chip: where its value came from, and whether
+// it can still change.
+const SOURCE_HINTS: Record<Slot['source'], string> = {
+    chat:
+        'Taken from your messages by the chat. It may change as the conversation goes on.',
+    page:
+        'Taken from what you selected on the portal. It changes when you change the page.',
+    user:
+        'You set this here. The chat and the page leave it as it is until you change it.',
+};
+
+const SOURCE_ICONS: Record<Slot['source'], typeof MessageCircleIcon> = {
+    chat: MessageCircleIcon,
+    page: MousePointerClickIcon,
+    user: PencilIcon,
 };
 
 interface Props {
@@ -77,6 +108,7 @@ export const SlotChip: FC<Props> = ({
     const needsAnswer =
         slot.status === 'ambiguous' || (slot.status === 'missing' && asked);
     const hasValue = slot.status !== 'missing' && Boolean(slot.value);
+    const SourceIcon = SOURCE_ICONS[slot.source];
 
     const choose = (
         value: string | null,
@@ -121,56 +153,93 @@ export const SlotChip: FC<Props> = ({
                 if (next) setDraft(hasValue ? slot.value ?? '' : '');
             }}
         >
-            <PopoverTrigger
-                render={
-                    <button
-                        type="button"
-                        title={`${label}${hasValue ? `: ${slot.value}` : ''}${
-                            hasValue ? ` (${SOURCE_LABELS[slot.source]})` : ''
-                        }${
-                            needsAnswer
-                                ? ' · Needs your answer: click to choose'
-                                : ''
-                        }`}
-                        className={cn(
-                            'inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-left text-[11px] leading-4 transition-colors',
-                            slot.status === 'specified' &&
-                                'border-[#3786c2]/30 bg-[#3786c2]/10 text-foreground hover:bg-[#3786c2]/15',
-                            needsAnswer &&
-                                'border-yellow-500 bg-yellow-100 font-medium text-yellow-950 hover:bg-yellow-200 dark:bg-yellow-900/50 dark:text-yellow-100',
-                            slot.status === 'missing' &&
-                                !needsAnswer &&
-                                cn(
-                                    'border-dashed bg-transparent text-muted-foreground hover:border-[#3786c2]/50 hover:text-foreground',
-                                    core
-                                        ? 'border-muted-foreground/60'
-                                        : 'border-border'
-                                )
-                        )}
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger
+                        render={
+                            <PopoverTrigger
+                                render={
+                                    <button
+                                        type="button"
+                                        className={cn(
+                                            'inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-left text-[11px] leading-4 transition-colors',
+                                            slot.status === 'specified' &&
+                                                'border-[#3786c2]/30 bg-[#3786c2]/10 text-foreground hover:bg-[#3786c2]/15',
+                                            needsAnswer &&
+                                                'border-yellow-500 bg-yellow-100 font-medium text-yellow-950 hover:bg-yellow-200 dark:bg-yellow-900/50 dark:text-yellow-100',
+                                            slot.status === 'missing' &&
+                                                !needsAnswer &&
+                                                cn(
+                                                    'border-dashed bg-transparent text-muted-foreground hover:border-[#3786c2]/50 hover:text-foreground',
+                                                    core
+                                                        ? 'border-muted-foreground/60'
+                                                        : 'border-border'
+                                                )
+                                        )}
+                                    />
+                                }
+                            >
+                                {needsAnswer ? (
+                                    <CircleHelpIcon
+                                        className="size-3 shrink-0 text-yellow-700 dark:text-yellow-300"
+                                        aria-hidden
+                                    />
+                                ) : slot.status === 'missing' ? (
+                                    <PlusIcon
+                                        className="size-3 shrink-0"
+                                        aria-hidden
+                                    />
+                                ) : hasValue ? (
+                                    // Where a filled value came from: the chat, the user's
+                                    // clicks on the page, or the user's edit in the box.
+                                    <SourceIcon
+                                        className="size-3 shrink-0 text-[#3786c2]"
+                                        aria-hidden
+                                    />
+                                ) : null}
+                                {needsAnswer && (
+                                    <span className="sr-only">
+                                        Needs your answer:{' '}
+                                    </span>
+                                )}
+                                <span className="shrink-0 font-medium">
+                                    {SHORT_LABELS[name]}
+                                </span>
+                                {hasValue && (
+                                    <span className="min-w-0 truncate">
+                                        : {slot.value}
+                                    </span>
+                                )}
+                                {hasValue && (
+                                    <span className="sr-only">
+                                        {' '}
+                                        ({SOURCE_LABELS[slot.source]})
+                                    </span>
+                                )}
+                            </PopoverTrigger>
+                        }
                     />
-                }
-            >
-                {needsAnswer ? (
-                    <CircleHelpIcon
-                        className="size-3 shrink-0 text-yellow-700 dark:text-yellow-300"
-                        aria-hidden
-                    />
-                ) : slot.status === 'missing' ? (
-                    <PlusIcon className="size-3 shrink-0" aria-hidden />
-                ) : null}
-                {needsAnswer && (
-                    <span className="sr-only">Needs your answer: </span>
-                )}
-                <span className="shrink-0 font-medium">
-                    {SHORT_LABELS[name]}
-                </span>
-                {hasValue && (
-                    <span className="min-w-0 truncate">: {slot.value}</span>
-                )}
-                {slot.source === 'page' && hasValue && (
-                    <span className="sr-only"> (from the page)</span>
-                )}
-            </PopoverTrigger>
+                    <TooltipContent
+                        side="bottom"
+                        align="start"
+                        // Lets the pointer reach the chips the hint covers.
+                        passThrough
+                        className="pointer-events-none max-w-56 flex-col items-start gap-0.5"
+                    >
+                        <span className="font-semibold">
+                            {label}
+                            {hasValue ? `: ${slot.value}` : ''}
+                        </span>
+                        <span className="opacity-80">
+                            {needsAnswer
+                                ? 'Needs your answer: click to choose.'
+                                : hasValue
+                                ? SOURCE_HINTS[slot.source]
+                                : 'Not set yet: click to add it.'}
+                        </span>
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
             <PopoverContent align="start" className="w-64 p-2.5 text-xs">
                 <p className="mb-1.5 font-medium text-foreground">
                     {slot.status === 'ambiguous'

@@ -44,6 +44,7 @@ import {
     textOfMessage,
 } from './classification.js';
 import { guidanceBlock, parseSections } from './guidance.js';
+import { dataTools } from './data/tools.js';
 import { logGuidanceEvent } from './guidanceLog.js';
 
 const vertexAnthropic = createVertexAnthropic({
@@ -324,7 +325,7 @@ const setHighlightsTool = tool({
                     cue: z
                         .enum(['context', 'result', 'next_step'])
                         .describe(
-                            'context: the cohort the user is looking at; result: where the answer is (numbered, reading order); next_step: one control or view to open next'
+                            "context: the cohort the user is looking at; result: where the answer is (numbered, reading order); next_step: where to do the one next step that follows from this answer's finding (to test, explain or extend it)"
                         ),
                     target: z
                         .string()
@@ -468,6 +469,7 @@ export async function runChat(
     ]);
     const tools: ToolSet = {
         ...mcpTools,
+        ...dataTools,
         go_to_page: goToPageTool,
         get_page_details: getPageDetailsTool,
         set_research_question: setResearchQuestionTool,

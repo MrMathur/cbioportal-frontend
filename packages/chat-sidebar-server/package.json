@@ -7,7 +7,8 @@
     "scripts": {
         "dev": "tsx watch src/server.ts",
         "build": "tsc && cp src/systemPrompt.md dist/systemPrompt.md && cp src/reportPrompt.md dist/reportPrompt.md && cp src/followupsPrompt.md dist/followupsPrompt.md && cp src/capabilitiesPrompt.md dist/capabilitiesPrompt.md && cp src/highlightsPrompt.md dist/highlightsPrompt.md && cp src/classifyPrompt.md dist/classifyPrompt.md && cp src/guidancePrompt.md dist/guidancePrompt.md",
-        "test": "node --import tsx --test src/*.test.ts",
+        "test": "node --import tsx --test src/*.test.ts src/data/*.test.ts",
+        "test:live": "node --import tsx --test src/data/*.live.ts",
         "start": "tsx src/server.ts",
         "export-log": "tsx src/exportLog.ts"
     },

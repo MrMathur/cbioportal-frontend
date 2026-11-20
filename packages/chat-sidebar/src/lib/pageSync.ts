@@ -83,7 +83,8 @@ function recordWaitingStep(): void {
 function sync(): void {
     if (!guidanceEnabled || !page) return;
     setPageSlots(
-        slotsFromPage(page.href, page.details, getCatalog(), getStudyContext())
+        slotsFromPage(page.href, page.details, getCatalog(), getStudyContext()),
+        page.href
     );
 }
 
