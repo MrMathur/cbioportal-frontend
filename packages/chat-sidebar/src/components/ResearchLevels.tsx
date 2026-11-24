@@ -506,9 +506,16 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
                                 }
                                 suggestions={suggestionsFor(name, research)}
                                 onSet={(value, via) => {
+                                    const before = research.slots[name];
+                                    // Filling a slot the chat asked for, or
+                                    // changing one that was set, goes to the
+                                    // chat too, so the reply follows the box.
                                     const answersChat =
                                         Boolean(value) &&
-                                        research.askedSlots.includes(name);
+                                        (research.askedSlots.includes(name) ||
+                                            (before.status === 'specified' &&
+                                                Boolean(before.value) &&
+                                                before.value !== value));
                                     setSlotByUser(
                                         threadId,
                                         localId,
@@ -517,8 +524,6 @@ export const ResearchLevels: FC<{ research: ActiveResearch }> = ({
                                         via
                                     );
                                     syncPortalToSlots();
-                                    // The chat asked for this slot: filling it
-                                    // here answers the chat.
                                     if (answersChat && value) {
                                         const text = slotAnswerMessage(
                                             name,

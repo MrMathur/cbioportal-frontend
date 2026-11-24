@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import {
+    sameSlotValue,
     CatalogMatches,
     computeLevel,
     findLatestClassification,
@@ -335,6 +336,29 @@ test('a user-fixed slot holds unless the message names another value', () => {
     );
     assert.equal(replaced.slots.entity.value, 'KRAS');
     assert.equal(replaced.slots.entity.source, 'chat');
+});
+
+test('a user-fixed slot holds when the message names it differently written', () => {
+    const fixed: GuidanceContext['fixedSlots'] = {
+        entity: { status: 'specified', value: 'egfr', source: 'user' },
+    };
+    const kept = resolveClassification(
+        raw({ slots: { ...raw().slots, entity: slot('specified', 'EGFR') } }),
+        ctx({ fixedSlots: fixed }),
+        'm'
+    );
+    assert.equal(kept.slots.entity.source, 'user');
+    assert.equal(kept.slots.entity.value, 'egfr');
+});
+
+test('slot values compare without case or a study’s [id]', () => {
+    assert.ok(
+        sameSlotValue(
+            'Ovarian Serous Cystadenocarcinoma (TCGA, PanCancer Atlas) [ov_tcga_pan_can_atlas_2018]',
+            'ovarian serous cystadenocarcinoma (TCGA, PanCancer Atlas)'
+        )
+    );
+    assert.ok(!sameSlotValue('KRAS', 'EGFR'));
 });
 
 test('a new topic drops what the user fixed and what the page shows', () => {
@@ -1155,6 +1179,44 @@ test('several matches offer the subtypes of those that span several cohorts', ()
         'Lung Squamous Cell Carcinoma',
         'Small Cell Lung Cancer',
     ]);
+});
+
+test('a cancer type named exactly within a named study is specified', () => {
+    const nsclc = {
+        id: 'nsclc',
+        name: 'Non-Small Cell Lung Cancer',
+        parent: 'lung',
+        ownStudies: 3,
+        subtreeStudies: 30,
+        children: [],
+        subtypes: [
+            { id: 'luad', name: 'Lung Adenocarcinoma', ownStudies: 20 },
+            { id: 'lusc', name: 'Lung Squamous Cell Carcinoma', ownStudies: 7 },
+        ],
+    };
+    const slots = (study: ReturnType<typeof slot>) => ({
+        ...raw().slots,
+        cohort: slot('ambiguous', 'Non-Small Cell Lung Cancer', ['nsclc']),
+        study,
+        entity: slot('specified', 'KRAS, STK11'),
+        measure: slot('specified', 'co-occurrence'),
+    });
+    const withStudy = resolveClassification(
+        raw({
+            slots: slots(slot('specified', 'MSK-CHORD (MSK, Nature 2024)')),
+        }),
+        ctx({ catalog: catalog({ cancerTypes: [nsclc] }) }),
+        'In MSK-CHORD non-small cell lung cancer, do KRAS and STK11 co-occur?'
+    );
+    assert.equal(withStudy.slots.cohort.status, 'specified');
+    assert.equal(withStudy.slots.cohort.value, 'Non-Small Cell Lung Cancer');
+    // Without a study, the subtypes are still offered.
+    const withoutStudy = resolveClassification(
+        raw({ slots: slots(slot('missing', null)) }),
+        ctx({ catalog: catalog({ cancerTypes: [nsclc] }) }),
+        'do KRAS and STK11 co-occur in non-small cell lung cancer?'
+    );
+    assert.equal(withoutStudy.slots.cohort.status, 'ambiguous');
 });
 
 test('an ambiguous slot with one option is that option', () => {

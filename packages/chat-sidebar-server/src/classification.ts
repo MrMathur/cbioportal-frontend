@@ -340,7 +340,10 @@ export function separateCohorts(type: CancerTypeMatch): string[] {
 function resolveCohort(
     raw: RawClassification['slots']['cohort'],
     context: GuidanceContext,
-    checks: string[]
+    checks: string[],
+    // The message names one study: a cohort it names is a subset of that
+    // study, not a choice among the portal's cancer types.
+    studyNamed = false
 ): Slot {
     const slot: Slot = {
         status: raw.status,
@@ -420,6 +423,18 @@ function resolveCohort(
             ...slot,
             status: 'ambiguous',
             options: options.slice(0, MAX_OPTIONS),
+        };
+    }
+    const exactName = Boolean(value) && matched[0].name.toLowerCase() === value;
+    if (studyNamed && exactName) {
+        checks.push(
+            `cohort: ${matched[0].name} named exactly within a named study, so specified`
+        );
+        return {
+            ...slot,
+            status: 'specified',
+            value: matched[0].name,
+            options: [],
         };
     }
     const subtypes = separateCohorts(matched[0]);
@@ -583,6 +598,23 @@ export function computeLevel(
     return { level: 'L4', guidance_degree: 'light_prescribing_checking' };
 }
 
+/**
+ * Whether two slot values name the same thing, ignoring case, spacing and a
+ * study's trailing "[id]" (kept on values picked from the study list).
+ */
+export function sameSlotValue(
+    a: string | null | undefined,
+    b: string | null | undefined
+): boolean {
+    const norm = (v: string | null | undefined) =>
+        (v ?? '')
+            .replace(/\s*\[[^\]]+\]\s*$/, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    return norm(a) === norm(b);
+}
+
 // A slot the user or page fixed holds unless the message itself names a
 // different value for it. What the user fixed belongs to their current
 // topic, so it lapses when the message starts a new one; the page's values
@@ -599,7 +631,11 @@ function applyFixed(
     const rawSlot = raw.slots[name];
     // An ambiguous slot often has no single value, only options; it still
     // replaces the fixed one.
-    if (rawSlot.status !== 'missing' && rawSlot.value !== fixed.value) {
+    if (rawSlot.status === 'ambiguous') return slot;
+    if (
+        rawSlot.status !== 'missing' &&
+        sameSlotValue(rawSlot.value, fixed.value) === false
+    ) {
         return slot;
     }
     return {
@@ -704,7 +740,12 @@ export function resolveClassification(
                 source: 'chat',
             };
         }
-        slots.cohort = resolveCohort(raw.slots.cohort, context, checks);
+        slots.cohort = resolveCohort(
+            raw.slots.cohort,
+            context,
+            checks,
+            raw.slots.study.status === 'specified' && !raw.study_is_collection
+        );
         slots.cohort = applyFixed('cohort', slots.cohort, raw, context);
         const cohortIds = cohortTypeIds(
             cohortMatchIds(raw, slots.cohort, context.catalog),

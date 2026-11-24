@@ -723,20 +723,18 @@ export function setPageSlots(
     applyPageSlots();
 }
 
-// The page the sidebar itself last took the portal to. Its slots come from the
-// chat (it followed the question), not from the user's clicks on the page.
+// The pages the sidebar itself last took the portal to: every address the
+// page passes through while it loads (a Results View rewrites its URL as it
+// settles). Their slots come from the chat, which followed the question, not
+// from the user's clicks on the page.
 let latestPageHref = '';
-let chatLandingHref: string | undefined;
+let chatPageHrefs = new Set<string>();
 
 function pageSlotSource(): 'chat' | 'page' {
-    if (
-        latestPageHref &&
-        latestPageHref !== lastPage?.href &&
-        Date.now() - expectedNavigationAt < EXPECTED_NAVIGATION_MS
-    ) {
-        chatLandingHref = latestPageHref;
+    if (latestPageHref && sidebarNavigationActive()) {
+        chatPageHrefs.add(latestPageHref);
     }
-    return latestPageHref === chatLandingHref ? 'chat' : 'page';
+    return chatPageHrefs.has(latestPageHref) ? 'chat' : 'page';
 }
 
 function applyPageSlots(): void {
@@ -801,12 +799,15 @@ const EXPECTED_NAVIGATION_MS = 20_000;
 /** Called before the sidebar navigates the portal itself. */
 export function expectPageNavigation(): void {
     expectedNavigationAt = Date.now();
-    expectedViewAt = expectedNavigationAt;
+    chatPageHrefs = new Set();
 }
 
-// The same, for the page view the navigation lands on (pageSync.ts), which
-// may settle after the URL changes.
-let expectedViewAt = 0;
+// Every page change for a while after the sidebar navigated is part of that
+// navigation: a page settles through several addresses and views (a Results
+// View first without, then with its genes), none of them the user's step.
+function sidebarNavigationActive(): boolean {
+    return Date.now() - expectedNavigationAt < EXPECTED_NAVIGATION_MS;
+}
 
 function pageFilterText(): string {
     return [
@@ -833,10 +834,7 @@ export function recordPageChange(href: string): void {
     };
     lastPage = current;
     if (!previous || previous.href === href) return;
-    if (Date.now() - expectedNavigationAt < EXPECTED_NAVIGATION_MS) {
-        expectedNavigationAt = 0;
-        return;
-    }
+    if (sidebarNavigationActive()) return;
     if (
         !current.keys ||
         !previous.keys ||
@@ -884,14 +882,9 @@ export function recordPageChange(href: string): void {
     }
 }
 
-/**
- * Whether a new page view is where the sidebar itself just navigated the
- * portal. Answers true once per navigation.
- */
+/** Whether a new page view is part of the sidebar's own navigation. */
 export function takeExpectedPageView(): boolean {
-    const expected = Date.now() - expectedViewAt < EXPECTED_NAVIGATION_MS;
-    expectedViewAt = 0;
-    return expected;
+    return sidebarNavigationActive();
 }
 
 // Page steps recorded in this tab, which the chat responds to even when they

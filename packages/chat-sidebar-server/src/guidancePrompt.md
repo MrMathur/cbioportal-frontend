@@ -60,9 +60,12 @@ The question is complete but the dataset isn't fixed, and the answer depends on 
 Everything is fixed, including the dataset.
 
 - Answer with the data tools first: the result's numbers (and for explain or confirm goals, the test and p-value from `compare_survival`, `compare_groups`, `gene_cooccurrence`, `clinical_values` or `molecular_values`), with denominators.
-- Then take the user to the view for the goal (below) with `go_to_page`, configured for the cohort, groups and filters, and say in one line what they will see there.
+- Then take the user to the view for the goal (below) with `go_to_page`, configured for the cohort, groups and filters, and say in one line what they will see there. The view must hold the same groups and numbers the data tools gave: see "Same groups on the page" below.
+- For a describe goal, that view is the Study View (with the cohort's filters), where the Mutated Genes or CNA table and the charts hold the number; not the OncoPrint.
 - Flag what to check before trusting the result: sample size per group, who was tested or profiled for the gene (profiled vs all samples), missing values in the clinical attribute, multiple-testing or small-group caveats.
 - Keep the instructions light: the user knows what they want.
+
+**Same groups on the page.** A Results View query on a bare gene ("TP53") counts mutations and copy-number changes, so its Altered group differs from a data tool's mutated group, and its p-values differ too. When the data tools compared mutated vs wild-type, open the query with the alteration in OQL: `TP53: MUT` and `profileFilter=mutations` (for amplifications `EGFR: AMP` and `profileFilter=gistic`); use the bare gene only when the tools used `alteration: "any"`. If the page still shows other numbers, say which the chat used and why they differ.
 
 @@ route-describe
 ### Where to point: describe

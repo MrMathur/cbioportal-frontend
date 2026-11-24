@@ -18,6 +18,7 @@ import URL from 'url';
 import { DefaultTooltip, getBrowserWindow } from 'cbioportal-frontend-commons';
 import { ChatHighlightBadge } from '../chatSidebar/ChatHighlightBadge';
 import {
+    getHighlight,
     HighlightTargetType,
     highlightTargetProps,
 } from '../chatSidebar/highlightStore';
@@ -147,6 +148,8 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
     private needToRecomputeNavTabWidths = true;
     private widthReaction: IReactionDisposer;
     private renderedTabs: RegisteredTab[] = [];
+    // The pagination page each rendered tab is on.
+    private tabPageOf: { [tabId: string]: number } = {};
 
     public static defaultProps: Partial<IMSKTabsProps> = {
         unmountOnHide: true,
@@ -314,29 +317,57 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
         const pages = this.tabPages(children, effectiveActiveTab);
         const pageCount = this.pageBreaks.length + 1;
 
-        const prev =
-            this.currentPage > 1 ? (
-                <li key="prevPage" style={{ cursor: 'pointer' }}>
-                    <a onClick={this.prevPage.bind(this)}>
+        // A tab the chat marked on another page of tabs isn't drawn, so its
+        // badge goes on the arrow that leads to it (and the chat's link to it
+        // scrolls there).
+        const highlightTargetType = this.props.highlightTargetType;
+        const markedTabBeyond = (later: boolean): string | undefined => {
+            if (!highlightTargetType) return undefined;
+            return Object.keys(this.tabPageOf).find(id => {
+                const page = this.tabPageOf[id];
+                const beyond = later
+                    ? page > this.currentPage
+                    : page < this.currentPage;
+                const annotation = beyond
+                    ? getHighlight(highlightTargetType, id)
+                    : undefined;
+                return annotation !== undefined && annotation.cue !== 'context';
+            });
+        };
+        const arrow = (later: boolean) => {
+            const markedTab = markedTabBeyond(later);
+            return (
+                <li
+                    key={later ? 'nextPage' : 'prevPage'}
+                    style={{ cursor: 'pointer' }}
+                    {...(markedTab && highlightTargetType
+                        ? highlightTargetProps(highlightTargetType, markedTab)
+                        : {})}
+                >
+                    <a
+                        onClick={(later ? this.nextPage : this.prevPage).bind(
+                            this
+                        )}
+                    >
                         <i
-                            className="fa fa-chevron-left"
+                            className={`fa fa-chevron-${
+                                later ? 'right' : 'left'
+                            }`}
                             style={this.props.arrowStyle}
                         />
+                        {markedTab && highlightTargetType && (
+                            <ChatHighlightBadge
+                                targetType={highlightTargetType}
+                                targetId={markedTab}
+                                className="chat-highlight-badge-tab"
+                            />
+                        )}
                     </a>
                 </li>
-            ) : null;
-
-        const next =
-            this.currentPage < pageCount ? (
-                <li key="nextPage" style={{ cursor: 'pointer' }}>
-                    <a onClick={this.nextPage.bind(this)}>
-                        <i
-                            className="fa fa-chevron-right"
-                            style={this.props.arrowStyle}
-                        />
-                    </a>
-                </li>
-            ) : null;
+            );
+        };
+        const prev = this.currentPage > 1 ? arrow(false) : null;
+        const next = this.currentPage < pageCount ? arrow(true) : null;
 
         const navButtonStyle: string = this.props.tabButtonStyle || 'tabs';
 
@@ -383,6 +414,7 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
         const pages: JSX.Element[][] = [[]];
         let currentPage = 1;
         this.renderedTabs = [];
+        this.tabPageOf = {};
 
         React.Children.forEach(
             children,
@@ -434,6 +466,7 @@ export class MSKTabs extends React.Component<IMSKTabsProps> {
                     );
                 }
 
+                this.tabPageOf[tab.props.id] = currentPage;
                 const href = this.getTabHref(tab.props.id);
                 const highlightTargetType = this.props.highlightTargetType;
                 if (highlightTargetType) {

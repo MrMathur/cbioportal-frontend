@@ -58,6 +58,10 @@ Measure terms: mutation frequency, alteration frequency, copy number, mRNA expre
 
 **Groups.** Set `needs_groups` true when the results are needed per group, for any goal: a comparison, a breakdown ("by subtype"), "X vs Y". A ranking or a single number for one cohort doesn't need groups. A correlation between two variables doesn't need groups.
 
+A gene's alteration set against an outcome or attribute ("Is TP53 mutation associated with survival?", "does KRAS mutation affect age at diagnosis?") defines its groups: `groups` is specified as "<gene> mutated vs wild-type" (or "amplified vs not amplified", following the alteration named). Never mark such groups missing.
+
+**Aim of a sibling.** When a follow-up switches to another gene, cohort or measure within the same aim (move `sibling`), redraft `broad_aim` so it covers both ("Understand KRAS and EGFR in lung adenocarcinoma"), unless the user wrote the aim.
+
 Slots fixed in earlier turns stay specified when this message is a follow-up of the same question (move `same`, `refine`, `broaden` or `sibling`); restate their values. On a `new` question, start the slots over from this message.
 
 ## Flags
